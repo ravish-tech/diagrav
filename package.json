@@ -8,8 +8,8 @@
   ],
   "scripts": {
     "dev": "npm run dev -w @diagrav/ui",
-    "build": "npm run build -w @diagrav/core && npm run build -w @diagrav/ui",
-    "typecheck": "npm run typecheck -w @diagrav/core && npm run typecheck -w @diagrav/ui",
-    "test": "npm run test -w @diagrav/core"
+    "build": "npm run build -w @diagrav/core && npm run build -w @diagrav/mcp && npm run build -w @diagrav/ui",
+    "typecheck": "npm run typecheck -w @diagrav/core && npm run typecheck -w @diagrav/mcp && npm run typecheck -w @diagrav/ui",
+    "test": "npm run test -w @diagrav/core && npm run test -w @diagrav/mcp"
   }
 }

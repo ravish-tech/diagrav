@@ -15,6 +15,7 @@ import {
   createDistributeNodesCommand,
   createEmptyDocument,
   createMatchSizeCommand,
+  exportDocumentToSvg,
   serializeMetadataJson,
   validateDocument,
 } from '../index.js';
@@ -267,4 +268,30 @@ test('Align, Distribute, and Match Size commands work and undo cleanly', () => {
   // Undo restores n2 size
   engine.undo();
   assert.equal(engine.getNode('n2')?.geometry.width, 80);
+});
+
+test('exportDocumentToSvg renders standalone XML-safe SVG in Node.js without DOM', () => {
+  const doc = createEmptyDocument('Headless -- ]]> <SVG>');
+  const n1 = createDefaultNode({
+    id: 'n1',
+    labelText: 'Service A',
+    geometry: { x: 20, y: 30, width: 140, height: 60 },
+    style: { shadow: true },
+  });
+  const n2 = createDefaultNode({
+    id: 'n2',
+    labelText: 'Service B',
+    geometry: { x: 240, y: 30, width: 140, height: 60 },
+  });
+  const e1 = createDefaultEdge('n1', 'n2', { id: 'e1' });
+  doc.nodes.push(n1, n2);
+  doc.edges.push(e1);
+
+  const svg = exportDocumentToSvg(doc);
+  assert.ok(svg.startsWith('<svg xmlns="http://www.w3.org/2000/svg"'));
+  assert.ok(svg.includes('<metadata data-diagrav-version="1">'));
+  assert.ok(svg.includes('Service A'));
+  assert.ok(svg.includes('Service B'));
+  assert.ok(svg.includes('data-edge-id="e1"'));
+  assert.ok(!svg.includes('<SVG>')); // properly XML-escaped
 });

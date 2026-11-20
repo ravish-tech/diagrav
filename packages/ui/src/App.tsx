@@ -19,6 +19,7 @@ import { NotesDock } from './components/NotesDock';
 import { PalettePanel } from './components/PalettePanel';
 import { PropertiesPanel } from './components/PropertiesPanel';
 import { Toolbar, type AppViewMode } from './components/Toolbar';
+import { useAiBridge } from './hooks/useAiBridge';
 import { SAMPLES } from './samples';
 
 const PANEL_LAYOUT_KEY = 'diagrav.panelLayout.v1';
@@ -119,6 +120,7 @@ export function App() {
   });
   const [history, setHistory] = useState({ canUndo: false, canRedo: false });
   const [shapes, setShapes] = useState<ShapeDefinition[]>([]);
+  const aiBridge = useAiBridge(diagravRef, doc);
 
   useEffect(() => {
     try {
@@ -415,9 +417,24 @@ export function App() {
             <span>
               Mode: <strong>{viewMode}</strong> · Tool: <strong>{tool}</strong>
             </span>
-            <span>
-              Zoom: <strong>{Math.round(doc.viewport.zoom * 100)}%</strong> · Nodes:{' '}
-              {doc.nodes.length} · Edges: {doc.edges.length}
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 12 }}>
+              <button
+                type="button"
+                className={`diagrav-bridge-pill is-${aiBridge.status}`}
+                onClick={aiBridge.toggle}
+                title="Connect to local @diagrav/mcp WebSocket bridge (ws://127.0.0.1:4175)"
+              >
+                <span className="diagrav-bridge-dot" aria-hidden="true" />
+                {aiBridge.status === 'connected'
+                  ? 'AI Bridge: Live'
+                  : aiBridge.status === 'connecting'
+                    ? 'AI Bridge: Connecting…'
+                    : 'AI Bridge: Off'}
+              </button>
+              <span>
+                Zoom: <strong>{Math.round(doc.viewport.zoom * 100)}%</strong> · Nodes:{' '}
+                {doc.nodes.length} · Edges: {doc.edges.length}
+              </span>
             </span>
           </div>
         </div>

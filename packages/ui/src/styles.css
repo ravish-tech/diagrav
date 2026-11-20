@@ -240,6 +240,46 @@ body,
   flex-shrink: 0;
 }
 
+.diagrav-bridge-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--j-border, #cbd5e1);
+  background: var(--j-surface-1, #ffffff);
+  color: var(--j-fg-muted, #64748b);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.diagrav-bridge-pill:hover {
+  border-color: var(--j-accent, #2563eb);
+  color: var(--j-fg, #0f172a);
+}
+
+.diagrav-bridge-pill.is-connected {
+  border-color: #16a34a;
+  color: #15803d;
+  background: #f0fdf4;
+}
+
+.diagrav-bridge-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #94a3b8;
+}
+
+.diagrav-bridge-pill.is-connected .diagrav-bridge-dot {
+  background: #16a34a;
+}
+
+.diagrav-bridge-pill.is-connecting .diagrav-bridge-dot {
+  background: #f59e0b;
+}
+
 .diagrav-palette-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

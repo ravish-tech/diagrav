@@ -6,5 +6,6 @@ export * from './registries/edges.js';
 export * from './registries/labels.js';
 export * from './layout/alignment.js';
 export * from './renderer/svg-renderer.js';
+export * from './renderer/svg-string.js';
 export * from './renderer/interaction.js';
 export * from './diagram.js';
