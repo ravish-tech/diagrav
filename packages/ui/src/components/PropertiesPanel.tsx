@@ -200,7 +200,7 @@ export function PropertiesPanel({
   // Multi-selection view (yEd-style Align, Distribute/Space Equally, Match Size)
   if (multiCount > 1) {
     return (
-      <div className="diagrav-panel diagrav-sidebar-panel">
+      <div className="diagrav-panel">
         <Stack gap="item">
           <div className="diagrav-section-title">Selection</div>
           <div style={{ fontSize: 13, color: 'var(--j-fg-muted, #64748b)' }}>
@@ -329,7 +329,7 @@ export function PropertiesPanel({
   // Empty selection (document overview + shortcuts)
   if (!selectedNode && !selectedEdge) {
     return (
-      <div className="diagrav-panel diagrav-sidebar-panel">
+      <div className="diagrav-panel">
         <Stack gap="item">
           <div className="diagrav-section-title">Properties</div>
           <div style={{ fontSize: 13, color: 'var(--j-fg-muted, #64748b)' }}>
@@ -444,7 +444,7 @@ export function PropertiesPanel({
     };
 
     return (
-      <div className="diagrav-panel diagrav-sidebar-panel">
+      <div className="diagrav-panel">
         <Stack gap="item">
           <div className="diagrav-section-title">Node</div>
 
@@ -828,7 +828,7 @@ export function PropertiesPanel({
   };
 
   return (
-    <div className="diagrav-panel diagrav-sidebar-panel">
+    <div className="diagrav-panel">
       <Stack gap="item">
         <div className="diagrav-section-title">Connection</div>
 

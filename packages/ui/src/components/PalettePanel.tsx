@@ -19,7 +19,6 @@ export function PalettePanel({ shapes, disabled, onAddShape }: PalettePanelProps
   return (
     <div className="diagrav-panel">
       <Stack gap="related">
-        <div className="diagrav-section-title">Palette</div>
         <Accordion
           key={categoryNames.join(',')}
           variant="divided"

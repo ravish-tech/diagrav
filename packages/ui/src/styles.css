@@ -27,16 +27,217 @@ body,
 .diagrav-panel {
   height: 100%;
   overflow-y: auto;
-  padding: 12px;
+  padding: 10px 12px;
   box-sizing: border-box;
 }
 
-.diagrav-sidebar-panel {
-  width: 268px;
-  min-width: 268px;
-  max-width: 268px;
-  border-inline-end: 1px solid var(--j-border, #e2e8f0);
+.diagrav-studio-root {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden;
+  background: var(--j-bg, #f8fafc);
+  color: var(--j-fg, #0f172a);
+}
+
+.diagrav-workspace-stage {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.diagrav-workspace-center {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.diagrav-dock-column {
+  display: flex;
+  flex-direction: column;
+  width: 264px;
+  min-width: 264px;
+  max-width: 264px;
+  height: 100%;
   background: var(--j-surface-1, #ffffff);
+  z-index: 5;
+  overflow: hidden;
+}
+
+.diagrav-dock-column.is-left {
+  border-inline-end: 1px solid var(--j-border, #e2e8f0);
+}
+
+.diagrav-dock-column.is-right {
+  border-inline-start: 1px solid var(--j-border, #e2e8f0);
+}
+
+.diagrav-dock-pane {
+  display: flex;
+  flex-direction: column;
+  background: var(--j-surface-1, #ffffff);
+  min-height: 0;
+  overflow: hidden;
+}
+
+.diagrav-dock-pane.is-docked {
+  flex: 1 1 0;
+}
+
+.diagrav-dock-pane.is-docked.is-collapsed {
+  flex: 0 0 auto;
+}
+
+.diagrav-dock-pane.is-docked + .diagrav-dock-pane.is-docked {
+  border-top: 1px solid var(--j-border-strong, #cbd5e1);
+}
+
+.diagrav-dock-pane.is-floating {
+  position: absolute;
+  border: 1px solid var(--j-border-strong, #cbd5e1);
+  border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.16), 0 2px 6px rgba(15, 23, 42, 0.08);
+}
+
+.diagrav-dock-pane.is-dragging {
+  opacity: 0.92;
+  box-shadow: 0 18px 40px rgba(37, 99, 235, 0.22), 0 0 0 2px var(--j-accent, #2563eb);
+}
+
+.diagrav-pane-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px 6px 10px;
+  background: var(--j-surface-2, #f8fafc);
+  border-bottom: 1px solid var(--j-border, #e2e8f0);
+  cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
+  flex-shrink: 0;
+}
+
+.diagrav-pane-header:active {
+  cursor: grabbing;
+}
+
+.diagrav-pane-grip {
+  font-size: 11px;
+  letter-spacing: -1px;
+  color: var(--j-fg-subtle, #94a3b8);
+}
+
+.diagrav-pane-title {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--j-fg-muted, #475569);
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.diagrav-pane-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.diagrav-pane-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--j-fg-muted, #64748b);
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  padding: 0;
+}
+
+.diagrav-pane-btn:hover {
+  background: var(--j-surface-3, #e2e8f0);
+  color: var(--j-fg, #0f172a);
+}
+
+.diagrav-pane-body {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.diagrav-pane-resize-handle {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 14px;
+  height: 14px;
+  cursor: nwse-resize;
+  background: linear-gradient(135deg, transparent 50%, var(--j-border-strong, #cbd5e1) 50%);
+  border-bottom-right-radius: 9px;
+}
+
+.diagrav-drop-zone {
+  position: absolute;
+  width: 264px;
+  background: rgba(37, 99, 235, 0.14);
+  border: 2px dashed var(--j-accent, #2563eb);
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 900;
+  color: var(--j-accent, #2563eb);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  backdrop-filter: blur(2px);
+}
+
+.diagrav-drop-zone.is-left {
+  left: 6px;
+}
+
+.diagrav-drop-zone.is-right {
+  right: 6px;
+}
+
+.diagrav-drop-zone.is-full {
+  top: 6px;
+  bottom: 6px;
+}
+
+.diagrav-drop-zone.is-top {
+  top: 6px;
+  bottom: calc(50% + 4px);
+}
+
+.diagrav-drop-zone.is-bottom {
+  top: calc(50% + 4px);
+  bottom: 6px;
+}
+
+.diagrav-statusbar-wrap {
+  padding: 4px 12px;
+  background: var(--j-surface-2, #f8fafc);
+  border-top: 1px solid var(--j-border, #e2e8f0);
+  flex-shrink: 0;
 }
 
 .diagrav-palette-grid {

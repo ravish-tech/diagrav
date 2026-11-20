@@ -2,6 +2,9 @@ import type { EditorTool } from '@diagrav/core';
 import {
   Badge,
   Button,
+  DropdownItem,
+  DropdownMenu,
+  DropdownSeparator,
   Inline,
   SegmentedControl,
   Select,
@@ -10,6 +13,7 @@ import {
   TopBar,
 } from 'jenni-react';
 import type { SampleEntry } from '../samples';
+import type { PanelState } from './DockWorkspace';
 
 export type AppViewMode = 'editor' | 'readonly' | 'embed';
 
@@ -32,9 +36,10 @@ export interface ToolbarProps {
   onViewJson: () => void;
   onExportSvg: () => void;
   onImportJson: () => void;
-  notesOpen: boolean;
+  panelStates: Record<string, PanelState>;
   hasNotes: boolean;
-  onToggleNotes: () => void;
+  onTogglePanel: (panelId: string) => void;
+  onResetLayout: () => void;
 }
 
 export function Toolbar({
@@ -56,9 +61,10 @@ export function Toolbar({
   onViewJson,
   onExportSvg,
   onImportJson,
-  notesOpen,
+  panelStates,
   hasNotes,
-  onToggleNotes,
+  onTogglePanel,
+  onResetLayout,
 }: ToolbarProps) {
   const sampleOptions = [
     ...samples.map((s) => ({ value: s.id, label: s.name })),
@@ -66,6 +72,8 @@ export function Toolbar({
       ? [{ value: 'custom', label: customTitle || 'Imported JSON' }]
       : []),
   ];
+
+  const notesOpen = Boolean(panelStates.notes?.open);
 
   return (
     <TopBar
@@ -145,16 +153,38 @@ export function Toolbar({
                   Fit
                 </Button>
               </Tooltip>
-              <Tooltip content="Toggle Review Notes dock (auto-saved to docs/REVIEW_NOTES.md)">
-                <Button
-                  size="sm"
-                  variant={notesOpen ? 'soft' : 'ghost'}
-                  aria-pressed={notesOpen}
-                  onClick={onToggleNotes}
+              <DropdownMenu
+                align="end"
+                trigger={
+                  <Button size="sm" variant="ghost">
+                    Panels ▾
+                  </Button>
+                }
+              >
+                <DropdownItem
+                  role="menuitemcheckbox"
+                  checked={Boolean(panelStates.properties?.open)}
+                  onClick={() => onTogglePanel('properties')}
                 >
-                  Notes{hasNotes ? ' •' : ''}
-                </Button>
-              </Tooltip>
+                  Properties
+                </DropdownItem>
+                <DropdownItem
+                  role="menuitemcheckbox"
+                  checked={Boolean(panelStates.palette?.open)}
+                  onClick={() => onTogglePanel('palette')}
+                >
+                  Palette
+                </DropdownItem>
+                <DropdownItem
+                  role="menuitemcheckbox"
+                  checked={notesOpen}
+                  onClick={() => onTogglePanel('notes')}
+                >
+                  Review Notes{hasNotes ? ' •' : ''}
+                </DropdownItem>
+                <DropdownSeparator />
+                <DropdownItem onClick={onResetLayout}>Reset Panel Layout</DropdownItem>
+              </DropdownMenu>
             </>
           )}
         </Inline>

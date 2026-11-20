@@ -4,11 +4,10 @@ import { useEffect, useRef, useState } from 'react';
 const STORAGE_KEY = 'diagrav.reviewNotes';
 
 export interface NotesDockProps {
-  onClose: () => void;
   onHasContentChange?: (hasContent: boolean) => void;
 }
 
-export function NotesDock({ onClose, onHasContentChange }: NotesDockProps) {
+export function NotesDock({ onHasContentChange }: NotesDockProps) {
   const [notes, setNotes] = useState<string>(() => {
     try {
       return localStorage.getItem(STORAGE_KEY) ?? '';
@@ -126,9 +125,6 @@ export function NotesDock({ onClose, onHasContentChange }: NotesDockProps) {
             onClick={() => persistNotes('')}
           >
             Clear
-          </Button>
-          <Button size="sm" variant="ghost" onClick={onClose}>
-            Close
           </Button>
         </Inline>
       </div>

@@ -10,8 +10,9 @@ import {
   type SelectionState,
   type ShapeDefinition,
 } from '@diagrav/core';
-import { AppShell, Toaster, toast } from 'jenni-react';
+import { Toaster, toast } from 'jenni-react';
 import { useEffect, useRef, useState } from 'react';
+import { DockWorkspace, type DockPanelConfig, type PanelState } from './components/DockWorkspace';
 import { EmbedDemo } from './components/EmbedDemo';
 import { JsonViewerModal } from './components/JsonViewerModal';
 import { NotesDock } from './components/NotesDock';
@@ -19,6 +20,70 @@ import { PalettePanel } from './components/PalettePanel';
 import { PropertiesPanel } from './components/PropertiesPanel';
 import { Toolbar, type AppViewMode } from './components/Toolbar';
 import { SAMPLES } from './samples';
+
+const PANEL_LAYOUT_KEY = 'diagrav.panelLayout.v1';
+
+function createDefaultPanelStates(): Record<string, PanelState> {
+  return {
+    properties: {
+      id: 'properties',
+      open: true,
+      mode: 'docked',
+      side: 'left',
+      order: 0,
+      collapsed: false,
+      x: 24,
+      y: 24,
+      width: 272,
+      height: 500,
+      zIndex: 10,
+    },
+    palette: {
+      id: 'palette',
+      open: true,
+      mode: 'docked',
+      side: 'right',
+      order: 0,
+      collapsed: false,
+      x: 860,
+      y: 24,
+      width: 256,
+      height: 340,
+      zIndex: 11,
+    },
+    notes: {
+      id: 'notes',
+      open: false,
+      mode: 'docked',
+      side: 'right',
+      order: 1,
+      collapsed: false,
+      x: 620,
+      y: 360,
+      width: 300,
+      height: 240,
+      zIndex: 12,
+    },
+  };
+}
+
+function loadInitialPanelStates(): Record<string, PanelState> {
+  const defaults = createDefaultPanelStates();
+  try {
+    const raw = localStorage.getItem(PANEL_LAYOUT_KEY);
+    if (!raw) return defaults;
+    const parsed = JSON.parse(raw) as Record<string, Partial<PanelState>>;
+    const merged: Record<string, PanelState> = { ...defaults };
+    for (const id of Object.keys(defaults)) {
+      if (parsed[id] && typeof parsed[id] === 'object') {
+        merged[id] = { ...defaults[id], ...parsed[id], id };
+      }
+    }
+    return merged;
+  } catch {
+    return defaults;
+  }
+}
 
 function downloadText(filename: string, content: string, mime: string) {
   const blob = new Blob([content], { type: mime });
@@ -43,8 +108,8 @@ export function App() {
   const [viewMode, setViewMode] = useState<AppViewMode>('editor');
   const [tool, setTool] = useState<EditorTool>('select');
   const [showGrid, setShowGrid] = useState(true);
-  const [notesOpen, setNotesOpen] = useState(false);
   const [jsonOpen, setJsonOpen] = useState(false);
+  const [panelStates, setPanelStates] = useState<Record<string, PanelState>>(loadInitialPanelStates);
   const [hasNotes, setHasNotes] = useState(() => {
     try {
       return Boolean(localStorage.getItem('diagrav.reviewNotes')?.trim());
@@ -54,6 +119,14 @@ export function App() {
   });
   const [history, setHistory] = useState({ canUndo: false, canRedo: false });
   const [shapes, setShapes] = useState<ShapeDefinition[]>([]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(PANEL_LAYOUT_KEY, JSON.stringify(panelStates));
+    } catch {
+      // ignore storage errors
+    }
+  }, [panelStates]);
 
   useEffect(() => {
     if (!hostRef.current) return;
@@ -70,7 +143,6 @@ export function App() {
     const unsubSel = instance.onSelectionChange((sel) => setSelection(sel));
     const unsubHist = instance.onHistoryChange((h) => setHistory(h));
 
-    // Frame initial sample nicely once layout dimensions settle
     const raf = requestAnimationFrame(() => instance.fitToView(48));
 
     return () => {
@@ -87,7 +159,6 @@ export function App() {
 
   const handleViewModeChange = (next: AppViewMode) => {
     setViewMode(next);
-    // Keep hidden studio instance in readonly while viewing Embed Demo so shortcuts never leak
     diagravRef.current?.setMode(next === 'editor' ? 'editor' : 'readonly');
   };
 
@@ -110,6 +181,28 @@ export function App() {
     const next = !showGrid;
     setShowGrid(next);
     diagravRef.current?.setShowGrid(next);
+  };
+
+  const handleTogglePanel = (panelId: string) => {
+    setPanelStates((prev) => {
+      const cur = prev[panelId];
+      if (!cur) return prev;
+      const maxZ = Math.max(10, ...Object.values(prev).map((p) => p.zIndex));
+      return {
+        ...prev,
+        [panelId]: {
+          ...cur,
+          open: !cur.open,
+          collapsed: false,
+          zIndex: !cur.open ? maxZ + 1 : cur.zIndex,
+        },
+      };
+    });
+  };
+
+  const handleResetLayout = () => {
+    setPanelStates(createDefaultPanelStates());
+    toast.success('Panel layout reset');
   };
 
   const handleAddShape = (shape: ShapeDefinition, worldPos?: { x: number; y: number }) => {
@@ -208,58 +301,13 @@ export function App() {
 
   const isEmbed = viewMode === 'embed';
 
-  return (
-    <>
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept=".json,.diagrav.json"
-        style={{ display: 'none' }}
-        onChange={(e) => {
-          const f = e.target.files?.[0];
-          if (f) void handleImportFile(f);
-          e.target.value = '';
-        }}
-      />
-      {/* Always keep layout="workspace" so AppShell never unmounts the Diagrav SVG host */}
-      <AppShell
-        layout="workspace"
-        height="100vh"
-        asideWidth={210}
-        asideLabel="Palette"
-        dockHeight={200}
-        dockLabel="Review Notes"
-        sidebarOpen={!isEmbed}
-        asideOpen={!isEmbed}
-        dockOpen={!isEmbed && notesOpen}
-        onDockOpenChange={setNotesOpen}
-        topbar={
-          <Toolbar
-            viewMode={viewMode}
-            onViewModeChange={handleViewModeChange}
-            samples={SAMPLES}
-            activeSampleId={activeSampleId}
-            customTitle={customTitle}
-            onSelectSample={handleSelectSample}
-            tool={tool}
-            onToolChange={handleToolChange}
-            canUndo={history.canUndo}
-            canRedo={history.canRedo}
-            onUndo={() => diagravRef.current?.undo()}
-            onRedo={() => diagravRef.current?.redo()}
-            showGrid={showGrid}
-            onToggleGrid={handleToggleGrid}
-            onFitView={() => diagravRef.current?.fitToView(48)}
-            onViewJson={() => setJsonOpen(true)}
-            onExportSvg={handleExportSvg}
-            onImportJson={() => fileInputRef.current?.click()}
-            notesOpen={notesOpen}
-            hasNotes={hasNotes}
-            onToggleNotes={() => setNotesOpen((v) => !v)}
-          />
-        }
-        sidebar={
-          !isEmbed ? (
+  const dockPanels: DockPanelConfig[] = isEmbed
+    ? []
+    : [
+        {
+          id: 'properties',
+          title: 'Properties',
+          render: () => (
             <PropertiesPanel
               doc={doc}
               selection={selection}
@@ -274,38 +322,69 @@ export function App() {
               onMatchSizeNodes={(m) => diagravRef.current?.matchSizeSelected(m)}
               onDeleteSelection={handleDeleteSelection}
             />
-          ) : undefined
-        }
-        aside={
-          !isEmbed ? (
+          ),
+        },
+        {
+          id: 'palette',
+          title: 'Palette',
+          render: () => (
             <PalettePanel
               shapes={shapes}
               disabled={viewMode === 'readonly'}
               onAddShape={(s) => handleAddShape(s)}
             />
-          ) : undefined
-        }
-        dock={
-          !isEmbed ? (
-            <NotesDock
-              onClose={() => setNotesOpen(false)}
-              onHasContentChange={setHasNotes}
-            />
-          ) : undefined
-        }
-        statusbar={
-          !isEmbed ? (
-            <div className="diagrav-statusbar">
-              <span>
-                Mode: <strong>{viewMode}</strong> · Tool: <strong>{tool}</strong>
-              </span>
-              <span>
-                Zoom: <strong>{Math.round(doc.viewport.zoom * 100)}%</strong> · Nodes:{' '}
-                {doc.nodes.length} · Edges: {doc.edges.length}
-              </span>
-            </div>
-          ) : undefined
-        }
+          ),
+        },
+        {
+          id: 'notes',
+          title: 'Review Notes',
+          render: () => <NotesDock onHasContentChange={setHasNotes} />,
+        },
+      ];
+
+  return (
+    <div className="diagrav-studio-root">
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".json,.diagrav.json"
+        style={{ display: 'none' }}
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) void handleImportFile(f);
+          e.target.value = '';
+        }}
+      />
+
+      <Toolbar
+        viewMode={viewMode}
+        onViewModeChange={handleViewModeChange}
+        samples={SAMPLES}
+        activeSampleId={activeSampleId}
+        customTitle={customTitle}
+        onSelectSample={handleSelectSample}
+        tool={tool}
+        onToolChange={handleToolChange}
+        canUndo={history.canUndo}
+        canRedo={history.canRedo}
+        onUndo={() => diagravRef.current?.undo()}
+        onRedo={() => diagravRef.current?.redo()}
+        showGrid={showGrid}
+        onToggleGrid={handleToggleGrid}
+        onFitView={() => diagravRef.current?.fitToView(48)}
+        onViewJson={() => setJsonOpen(true)}
+        onExportSvg={handleExportSvg}
+        onImportJson={() => fileInputRef.current?.click()}
+        panelStates={panelStates}
+        hasNotes={hasNotes}
+        onTogglePanel={handleTogglePanel}
+        onResetLayout={handleResetLayout}
+      />
+
+      <DockWorkspace
+        panels={dockPanels}
+        states={isEmbed ? {} : panelStates}
+        onChangeStates={setPanelStates}
       >
         <div
           ref={hostRef}
@@ -328,7 +407,22 @@ export function App() {
           }}
         />
         {isEmbed && <EmbedDemo />}
-      </AppShell>
+      </DockWorkspace>
+
+      {!isEmbed && (
+        <div className="diagrav-statusbar-wrap">
+          <div className="diagrav-statusbar">
+            <span>
+              Mode: <strong>{viewMode}</strong> · Tool: <strong>{tool}</strong>
+            </span>
+            <span>
+              Zoom: <strong>{Math.round(doc.viewport.zoom * 100)}%</strong> · Nodes:{' '}
+              {doc.nodes.length} · Edges: {doc.edges.length}
+            </span>
+          </div>
+        </div>
+      )}
+
       <JsonViewerModal
         open={jsonOpen}
         onOpenChange={setJsonOpen}
@@ -336,6 +430,6 @@ export function App() {
         onDownload={handleExportJson}
       />
       <Toaster position="bottom-right" />
-    </>
+    </div>
   );
 }
