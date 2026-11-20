@@ -24,6 +24,12 @@ body,
   -webkit-user-select: none;
 }
 
+.diagrav-label-handle:hover {
+  stroke: #2563eb;
+  stroke-dasharray: 3 2;
+  fill: rgba(37, 99, 235, 0.08);
+}
+
 .diagrav-panel {
   height: 100%;
   overflow-y: auto;

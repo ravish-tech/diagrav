@@ -446,7 +446,7 @@ export class InteractionController {
       return;
     }
 
-    // 3b. Label handle => drag-to-place label directly on canvas
+    // 3b. Label handle => auto-select owner & drag-to-place label directly on canvas in 1 motion
     const labelEl = target?.closest('[data-label-id]') as Element | null;
     const labelId = labelEl?.getAttribute('data-label-id');
     const labelTargetId = labelEl?.getAttribute('data-label-target-id');
@@ -456,6 +456,12 @@ export class InteractionController {
         const node = this.engine.getNode(labelTargetId);
         const lbl = node?.labels.find((l) => l.id === labelId);
         if (lbl) {
+          if (!this.selectedNodeIds.has(labelTargetId)) {
+            this.selectedNodeIds = new Set([labelTargetId]);
+            this.selectedEdgeIds.clear();
+            this.emitSelection();
+            this.redraw();
+          }
           this.drag = {
             kind: 'move-label',
             targetKind: 'node',
@@ -472,6 +478,12 @@ export class InteractionController {
         const edge = this.engine.getEdge(labelTargetId);
         const lbl = edge?.labels.find((l) => l.id === labelId);
         if (lbl) {
+          if (!this.selectedEdgeIds.has(labelTargetId)) {
+            this.selectedNodeIds.clear();
+            this.selectedEdgeIds = new Set([labelTargetId]);
+            this.emitSelection();
+            this.redraw();
+          }
           this.drag = {
             kind: 'move-label',
             targetKind: 'edge',

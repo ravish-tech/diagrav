@@ -460,8 +460,14 @@ export class SvgRenderer {
       const estW = Math.max(28, maxLen * label.style.fontSize * 0.62) + pad * 2;
       const estH = lines.length * label.style.fontSize * 1.25 + pad * 2;
 
-      // Interactive drag-to-place label handle when node is selected in editor mode
-      if (state.mode === 'editor' && !state.exportMode && isSelected) {
+      // Interactive drag-to-place label handle:
+      // Always active when node is selected OR when label is external/free (so moved labels stay directly grabbable!)
+      const showNodeLabelHandle =
+        state.mode === 'editor' &&
+        !state.exportMode &&
+        (isSelected || label.placement.model !== 'internal');
+
+      if (showNodeLabelHandle) {
         const boxX =
           pos.textAnchor === 'start'
             ? localX - pad
@@ -486,11 +492,16 @@ export class SvgRenderer {
             width: estW,
             height: estH,
             rx: 4 * invZoom,
-            fill: isDraggingThis ? 'rgba(37, 99, 235, 0.12)' : 'rgba(37, 99, 235, 0.04)',
-            stroke: '#2563eb',
+            fill: isDraggingThis
+              ? 'rgba(37, 99, 235, 0.14)'
+              : isSelected
+                ? 'rgba(37, 99, 235, 0.06)'
+                : 'transparent',
+            stroke: isSelected ? '#2563eb' : 'transparent',
             'stroke-width': 1 * invZoom,
-            'stroke-dasharray': `${3 * invZoom} ${2 * invZoom}`,
+            'stroke-dasharray': isSelected ? `${3 * invZoom} ${2 * invZoom}` : undefined,
             cursor: isDraggingThis ? 'grabbing' : 'grab',
+            'pointer-events': 'all',
           }),
         );
       }
@@ -578,7 +589,8 @@ export class SvgRenderer {
       const approxH = lines.length * label.style.fontSize * 1.25 + pad * 2;
 
       let bgRect: SVGRectElement | null = null;
-      const showLabelHandle = state.mode === 'editor' && !state.exportMode && isSelected;
+      // Edge labels are ALWAYS directly clickable & draggable in editor mode (1-step UX!)
+      const showLabelHandle = state.mode === 'editor' && !state.exportMode;
       const isDraggingThis = state.draggingLabel?.labelId === label.id;
       if (label.style.background || showLabelHandle) {
         bgRect = el('rect', {
@@ -591,10 +603,16 @@ export class SvgRenderer {
           width: approxW,
           height: approxH,
           rx: 4,
-          fill: label.style.background ?? (isDraggingThis ? 'rgba(37, 99, 235, 0.12)' : 'rgba(37, 99, 235, 0.05)'),
-          stroke: showLabelHandle ? '#2563eb' : undefined,
+          fill:
+            label.style.background ??
+            (isDraggingThis
+              ? 'rgba(37, 99, 235, 0.14)'
+              : isSelected
+                ? 'rgba(37, 99, 235, 0.06)'
+                : 'transparent'),
+          stroke: showLabelHandle && isSelected ? '#2563eb' : 'transparent',
           'stroke-width': showLabelHandle ? 1 * invZoom : undefined,
-          'stroke-dasharray': showLabelHandle ? `${3 * invZoom} ${2 * invZoom}` : undefined,
+          'stroke-dasharray': showLabelHandle && isSelected ? `${3 * invZoom} ${2 * invZoom}` : undefined,
           cursor: showLabelHandle ? (isDraggingThis ? 'grabbing' : 'grab') : undefined,
           'pointer-events': showLabelHandle ? 'all' : 'none',
         });
