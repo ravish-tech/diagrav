@@ -14,6 +14,13 @@ import type { CommandResult, DiagramCommand, EdgePatch, NodePatch } from './type
 export type EngineListener = (doc: DiagramDocument) => void;
 export type HistoryListener = (state: { canUndo: boolean; canRedo: boolean }) => void;
 
+export interface ExecuteOptions {
+  /** Coalesce rapid consecutive edits with the same key into a single Undo entry. */
+  mergeKey?: string;
+  /** Coalescing window in milliseconds (default: 500). */
+  mergeWindowMs?: number;
+}
+
 const MAX_HISTORY = 200;
 
 function applyNodePatch(node: DiagramNode, patch: NodePatch): DiagramNode {
@@ -56,6 +63,8 @@ export class CommandEngine {
   private doc: DiagramDocument;
   private undoStack: DiagramDocument[] = [];
   private redoStack: DiagramDocument[] = [];
+  private lastMergeKey: string | null = null;
+  private lastMergeTime = 0;
   private changeListeners = new Set<EngineListener>();
   private historyListeners = new Set<HistoryListener>();
 
@@ -93,11 +102,31 @@ export class CommandEngine {
     return () => this.historyListeners.delete(listener);
   }
 
-  execute(command: DiagramCommand): CommandResult {
+  execute(command: DiagramCommand, options?: ExecuteOptions): CommandResult {
+    // Fast-path non-recorded viewport updates to avoid cloning nodes/edges on every pan/zoom frame
+    if (command.type === 'viewport.set' && !command.recordHistory) {
+      this.doc = {
+        ...this.doc,
+        viewport: { ...command.viewport },
+      };
+      this.emitChange();
+      return { ok: true };
+    }
+
     const recordHistory =
       command.type === 'viewport.set' ? Boolean(command.recordHistory) : true;
 
-    const before = recordHistory ? cloneDocument(this.doc) : null;
+    const now = Date.now();
+    const mergeKey = options?.mergeKey;
+    const mergeWindow = options?.mergeWindowMs ?? 500;
+    const shouldMerge =
+      recordHistory &&
+      Boolean(mergeKey) &&
+      mergeKey === this.lastMergeKey &&
+      now - this.lastMergeTime <= mergeWindow &&
+      this.undoStack.length > 0;
+
+    const before = recordHistory && !shouldMerge ? cloneDocument(this.doc) : null;
     const next = cloneDocument(this.doc);
 
     const err = this.applyToDraft(next, command);
@@ -111,12 +140,18 @@ export class CommandEngine {
     if (command.type === 'document.load') {
       this.undoStack = [];
       this.redoStack = [];
+      this.lastMergeKey = null;
+    } else if (shouldMerge) {
+      this.lastMergeTime = now;
+      this.redoStack = [];
     } else if (recordHistory && before) {
       this.undoStack.push(before);
       if (this.undoStack.length > MAX_HISTORY) {
         this.undoStack.shift();
       }
       this.redoStack = [];
+      this.lastMergeKey = mergeKey ?? null;
+      this.lastMergeTime = now;
     }
 
     this.emitChange();
@@ -127,6 +162,7 @@ export class CommandEngine {
   undo(): boolean {
     const prev = this.undoStack.pop();
     if (!prev) return false;
+    this.lastMergeKey = null;
     this.redoStack.push(cloneDocument(this.doc));
     this.doc = prev;
     this.emitChange();
@@ -137,6 +173,7 @@ export class CommandEngine {
   redo(): boolean {
     const next = this.redoStack.pop();
     if (!next) return false;
+    this.lastMergeKey = null;
     this.undoStack.push(cloneDocument(this.doc));
     this.doc = next;
     this.emitChange();

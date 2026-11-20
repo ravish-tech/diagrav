@@ -256,6 +256,10 @@ export function cloneDocument(doc: DiagramDocument): DiagramDocument {
   return structuredClone(doc);
 }
 
+function isFiniteNumber(v: unknown): v is number {
+  return typeof v === 'number' && Number.isFinite(v);
+}
+
 export function validateDocument(input: unknown): DiagramDocument {
   if (!input || typeof input !== 'object') {
     throw new Error('Invalid diagram document: expected object');
@@ -267,20 +271,95 @@ export function validateDocument(input: unknown): DiagramDocument {
   if (!Array.isArray(obj.nodes) || !Array.isArray(obj.edges)) {
     throw new Error('Invalid diagram document: nodes and edges must be arrays');
   }
+
+  const vp = obj.viewport;
+  const vpX = vp && isFiniteNumber(vp.x) ? vp.x : 0;
+  const vpY = vp && isFiniteNumber(vp.y) ? vp.y : 0;
+  const vpZoom = vp && isFiniteNumber(vp.zoom) && vp.zoom > 0 ? vp.zoom : 1;
+
+  const nodes: DiagramNode[] = obj.nodes.map((raw, idx) => {
+    if (!raw || typeof raw !== 'object') {
+      throw new Error(`Invalid node at index ${idx}: expected object`);
+    }
+    const n = raw as Partial<DiagramNode>;
+    if (typeof n.id !== 'string' || !n.id) {
+      throw new Error(`Invalid node at index ${idx}: missing string id`);
+    }
+    if (typeof n.type !== 'string' || !n.type) {
+      throw new Error(`Invalid node "${n.id}": missing string type`);
+    }
+    const g = n.geometry;
+    if (
+      !g ||
+      !isFiniteNumber(g.x) ||
+      !isFiniteNumber(g.y) ||
+      !isFiniteNumber(g.width) ||
+      !isFiniteNumber(g.height) ||
+      g.width <= 0 ||
+      g.height <= 0
+    ) {
+      throw new Error(`Invalid node "${n.id}": invalid geometry`);
+    }
+    const style = n.style;
+    if (!style || typeof style !== 'object' || !style.fill || !style.border) {
+      throw new Error(`Invalid node "${n.id}": missing style.fill or style.border`);
+    }
+    return structuredClone({
+      id: n.id,
+      type: n.type,
+      geometry: {
+        x: g.x,
+        y: g.y,
+        width: g.width,
+        height: g.height,
+        rotation: isFiniteNumber(g.rotation) ? g.rotation : 0,
+      },
+      style,
+      labels: Array.isArray(n.labels) ? n.labels : [],
+      data: n.data,
+    });
+  });
+
+  const edges: DiagramEdge[] = obj.edges.map((raw, idx) => {
+    if (!raw || typeof raw !== 'object') {
+      throw new Error(`Invalid edge at index ${idx}: expected object`);
+    }
+    const e = raw as Partial<DiagramEdge>;
+    if (typeof e.id !== 'string' || !e.id) {
+      throw new Error(`Invalid edge at index ${idx}: missing string id`);
+    }
+    if (!e.source?.nodeId || !e.target?.nodeId) {
+      throw new Error(`Invalid edge "${e.id}": missing source.nodeId or target.nodeId`);
+    }
+    const style = e.style;
+    if (!style || typeof style !== 'object') {
+      throw new Error(`Invalid edge "${e.id}": missing style`);
+    }
+    const bends = Array.isArray(e.bends)
+      ? e.bends.filter((b): b is Point => Boolean(b) && isFiniteNumber(b.x) && isFiniteNumber(b.y))
+      : [];
+    return structuredClone({
+      id: e.id,
+      source: e.source,
+      target: e.target,
+      routing: e.routing ?? 'polyline',
+      bends,
+      style,
+      labels: Array.isArray(e.labels) ? e.labels : [],
+      data: e.data,
+    });
+  });
+
   return {
     schemaVersion: 1,
     meta: {
-      title: obj.meta?.title ?? 'Untitled Diagram',
+      title: typeof obj.meta?.title === 'string' ? obj.meta.title : 'Untitled Diagram',
       createdAt: obj.meta?.createdAt,
       updatedAt: obj.meta?.updatedAt,
     },
-    viewport: {
-      x: obj.viewport?.x ?? 0,
-      y: obj.viewport?.y ?? 0,
-      zoom: obj.viewport?.zoom ?? 1,
-    },
-    nodes: structuredClone(obj.nodes),
-    edges: structuredClone(obj.edges),
+    viewport: { x: vpX, y: vpY, zoom: vpZoom },
+    nodes,
+    edges,
     extensions: obj.extensions ? structuredClone(obj.extensions) : undefined,
   };
 }

@@ -4,6 +4,7 @@ import {
   type ArrowType,
   type DiagramDocument,
   type DiagramEdge,
+  type DiagramLabel,
   type DiagramNode,
   type EdgeLabelPlacement,
   type EdgePatch,
@@ -12,6 +13,7 @@ import {
   type NodeLabelPlacement,
   type NodeLabelPosition,
   type NodePatch,
+  type SelectionState,
   type ShapeDefinition,
 } from '@diagrav/core';
 import {
@@ -19,21 +21,25 @@ import {
   ColorPicker,
   Field,
   Input,
+  Kbd,
   NumberInput,
   Select,
   Separator,
   Stack,
   Switch,
 } from 'jenni-react';
+import { useEffect, useRef, useState } from 'react';
 
 export interface PropertiesPanelProps {
   doc: DiagramDocument;
+  selection: SelectionState;
   selectedNode: DiagramNode | null;
   selectedEdge: DiagramEdge | null;
   shapes: ShapeDefinition[];
   readOnly: boolean;
-  onUpdateNode: (id: string, patch: NodePatch) => void;
-  onUpdateEdge: (id: string, patch: EdgePatch) => void;
+  onUpdateNode: (id: string, patch: NodePatch, mergeKey?: string) => void;
+  onUpdateEdge: (id: string, patch: EdgePatch, mergeKey?: string) => void;
+  onDeleteSelection: () => void;
 }
 
 const ARROW_OPTIONS = [
@@ -64,31 +70,189 @@ const NODE_LABEL_POS_OPTIONS: Array<{ value: NodeLabelPosition; label: string }>
   { value: 'bottom-right', label: 'Bottom Right' },
 ];
 
+const FONT_WEIGHT_OPTIONS = [
+  { value: '400', label: 'Regular' },
+  { value: '500', label: 'Medium' },
+  { value: '600', label: 'Semibold' },
+  { value: '700', label: 'Bold' },
+];
+
+const SHAPES_WITH_RADIUS = new Set(['rect', 'rounded-rect']);
+
+// Pure static fallback templates (never invoke generateId during render)
+const FALLBACK_NODE_LABEL: DiagramLabel<NodeLabelPlacement> = {
+  id: '',
+  text: '',
+  placement: { model: 'internal', position: 'center' },
+  style: {
+    fontFamily: 'system-ui, -apple-system, sans-serif',
+    fontSize: 13,
+    fontWeight: 500,
+    color: '#1e293b',
+    align: 'center',
+    padding: 4,
+  },
+};
+
+const FALLBACK_EDGE_LABEL: DiagramLabel<EdgeLabelPlacement> = {
+  id: '',
+  text: '',
+  placement: { model: 'center', distance: -10 },
+  style: {
+    fontFamily: 'system-ui, -apple-system, sans-serif',
+    fontSize: 12,
+    fontWeight: 500,
+    color: '#334155',
+    background: '#ffffff',
+    padding: 3,
+    align: 'center',
+  },
+};
+
+/**
+ * Text input that avoids pushing one Undo history entry per keystroke:
+ * updates local draft immediately and commits on blur, Enter, or after a brief pause.
+ */
+function DebouncedTextInput({
+  value,
+  disabled,
+  onCommit,
+}: {
+  value: string;
+  disabled: boolean;
+  onCommit: (next: string) => void;
+}) {
+  const [draft, setDraft] = useState(value);
+  const timerRef = useRef<number | null>(null);
+  const lastCommittedRef = useRef(value);
+
+  useEffect(() => {
+    if (timerRef.current !== null) {
+      window.clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+    setDraft(value);
+    lastCommittedRef.current = value;
+  }, [value]);
+
+  useEffect(
+    () => () => {
+      if (timerRef.current !== null) window.clearTimeout(timerRef.current);
+    },
+    [],
+  );
+
+  const flush = (next: string) => {
+    if (timerRef.current !== null) {
+      window.clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+    if (next !== lastCommittedRef.current) {
+      lastCommittedRef.current = next;
+      onCommit(next);
+    }
+  };
+
+  return (
+    <Input
+      size="sm"
+      disabled={disabled}
+      value={draft}
+      onValueChange={(next) => {
+        setDraft(next);
+        if (timerRef.current !== null) window.clearTimeout(timerRef.current);
+        timerRef.current = window.setTimeout(() => flush(next), 350);
+      }}
+      onBlur={() => flush(draft)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') {
+          flush(draft);
+        }
+      }}
+    />
+  );
+}
+
 export function PropertiesPanel({
   doc,
+  selection,
   selectedNode,
   selectedEdge,
   shapes,
   readOnly,
   onUpdateNode,
   onUpdateEdge,
+  onDeleteSelection,
 }: PropertiesPanelProps) {
+  const multiCount = selection.nodeIds.length + selection.edgeIds.length;
+
+  // Multi-selection view
+  if (multiCount > 1) {
+    return (
+      <div className="diagrav-panel diagrav-sidebar-panel">
+        <Stack gap="item">
+          <div className="diagrav-section-title">Selection</div>
+          <div style={{ fontSize: 13, color: 'var(--j-fg-muted, #64748b)' }}>
+            <strong>{multiCount} elements selected</strong>
+            <br />
+            {selection.nodeIds.length} nodes · {selection.edgeIds.length} edges
+          </div>
+          {!readOnly && (
+            <>
+              <Separator />
+              <Button size="sm" variant="outline" tone="danger" onClick={onDeleteSelection}>
+                Delete Selected
+              </Button>
+            </>
+          )}
+        </Stack>
+      </div>
+    );
+  }
+
+  // Empty selection (document overview + shortcuts)
   if (!selectedNode && !selectedEdge) {
     return (
-      <div className="diagrav-panel">
+      <div className="diagrav-panel diagrav-sidebar-panel">
         <Stack gap="item">
           <div className="diagrav-section-title">Properties</div>
           <div style={{ fontSize: 13, color: 'var(--j-fg-muted, #64748b)' }}>
-            <strong>{doc.meta.title}</strong>
+            <strong style={{ color: 'var(--j-fg, #0f172a)' }}>{doc.meta.title}</strong>
             <br />
             {doc.nodes.length} nodes · {doc.edges.length} edges
           </div>
           <Separator />
-          <div style={{ fontSize: 12, color: 'var(--j-fg-muted, #64748b)', lineHeight: 1.5 }}>
-            <div>• Drag shapes from the Palette onto the canvas.</div>
-            <div>• Hover a node and drag its blue port (or use Connect tool) to link nodes.</div>
-            <div>• Select an edge and drag it to insert bend points. Double-click a bend to remove it.</div>
-            <div>• Double-click or press F2 to edit labels inline.</div>
+          <div className="diagrav-section-title">Quick Guide</div>
+          <div className="diagrav-shortcuts-list">
+            <div>Drag shapes from Palette or click to insert.</div>
+            <div>Hover a node and drag any blue port to connect.</div>
+            <div>Drag a selected edge to add bends; double-click a bend to remove.</div>
+          </div>
+          <Separator />
+          <div className="diagrav-section-title">Shortcuts</div>
+          <div className="diagrav-shortcuts-list">
+            <div className="diagrav-shortcut-row">
+              <span>Edit label</span>
+              <Kbd size="sm">F2</Kbd>
+            </div>
+            <div className="diagrav-shortcut-row">
+              <span>Undo / Redo</span>
+              <span>
+                <Kbd size="sm">⌘Z</Kbd>
+              </span>
+            </div>
+            <div className="diagrav-shortcut-row">
+              <span>Duplicate</span>
+              <Kbd size="sm">⌘D</Kbd>
+            </div>
+            <div className="diagrav-shortcut-row">
+              <span>Nudge</span>
+              <Kbd size="sm">↑↓←→</Kbd>
+            </div>
+            <div className="diagrav-shortcut-row">
+              <span>Delete</span>
+              <Kbd size="sm">Del</Kbd>
+            </div>
           </div>
         </Stack>
       </div>
@@ -97,7 +261,7 @@ export function PropertiesPanel({
 
   if (selectedNode) {
     const fill = selectedNode.style.fill;
-    const primaryLabel = selectedNode.labels[0] ?? createDefaultNodeLabel('');
+    const primaryLabel = selectedNode.labels[0] ?? FALLBACK_NODE_LABEL;
     const solidColor = fill.type === 'solid' ? fill.color : '#f8fafc';
     const gradStart =
       fill.type === 'linear-gradient' || fill.type === 'radial-gradient'
@@ -108,6 +272,7 @@ export function PropertiesPanel({
         ? fill.stops[fill.stops.length - 1]?.color ?? '#bfdbfe'
         : '#bfdbfe';
     const gradAngle = fill.type === 'linear-gradient' ? fill.angle : 135;
+    const supportsRadius = SHAPES_WITH_RADIUS.has(selectedNode.type);
 
     const handleFillTypeChange = (nextType: string) => {
       let nextFill: FillStyle;
@@ -143,24 +308,26 @@ export function PropertiesPanel({
         placement?: Partial<NodeLabelPlacement>;
         style?: Partial<typeof primaryLabel.style>;
       },
+      mergeKey?: string,
     ) => {
+      const base = selectedNode.labels[0] ?? createDefaultNodeLabel('');
       const updated = {
-        ...primaryLabel,
-        text: patch.text ?? primaryLabel.text,
+        ...base,
+        text: patch.text ?? base.text,
         placement: patch.placement
-          ? { ...primaryLabel.placement, ...patch.placement }
-          : primaryLabel.placement,
-        style: patch.style ? { ...primaryLabel.style, ...patch.style } : primaryLabel.style,
+          ? { ...base.placement, ...patch.placement }
+          : base.placement,
+        style: patch.style ? { ...base.style, ...patch.style } : base.style,
       };
       const nextLabels =
         selectedNode.labels.length > 0
           ? [updated, ...selectedNode.labels.slice(1)]
           : [updated];
-      onUpdateNode(selectedNode.id, { labels: nextLabels });
+      onUpdateNode(selectedNode.id, { labels: nextLabels }, mergeKey);
     };
 
     return (
-      <div className="diagrav-panel">
+      <div className="diagrav-panel diagrav-sidebar-panel">
         <Stack gap="item">
           <div className="diagrav-section-title">Node</div>
 
@@ -244,7 +411,11 @@ export function PropertiesPanel({
                 disabled={readOnly}
                 value={fill.color}
                 onValueChange={(c) =>
-                  onUpdateNode(selectedNode.id, { style: { fill: { ...fill, color: c } } })
+                  onUpdateNode(
+                    selectedNode.id,
+                    { style: { fill: { ...fill, color: c } } },
+                    `node-fill:${selectedNode.id}`,
+                  )
                 }
               />
             </Field>
@@ -259,17 +430,21 @@ export function PropertiesPanel({
                     disabled={readOnly}
                     value={gradStart}
                     onValueChange={(c) =>
-                      onUpdateNode(selectedNode.id, {
-                        style: {
-                          fill: {
-                            ...fill,
-                            stops: [
-                              { color: c, offset: 0 },
-                              { color: gradEnd, offset: 1 },
-                            ],
+                      onUpdateNode(
+                        selectedNode.id,
+                        {
+                          style: {
+                            fill: {
+                              ...fill,
+                              stops: [
+                                { color: c, offset: 0 },
+                                { color: gradEnd, offset: 1 },
+                              ],
+                            },
                           },
                         },
-                      })
+                        `node-grad-start:${selectedNode.id}`,
+                      )
                     }
                   />
                 </Field>
@@ -279,17 +454,21 @@ export function PropertiesPanel({
                     disabled={readOnly}
                     value={gradEnd}
                     onValueChange={(c) =>
-                      onUpdateNode(selectedNode.id, {
-                        style: {
-                          fill: {
-                            ...fill,
-                            stops: [
-                              { color: gradStart, offset: 0 },
-                              { color: c, offset: 1 },
-                            ],
+                      onUpdateNode(
+                        selectedNode.id,
+                        {
+                          style: {
+                            fill: {
+                              ...fill,
+                              stops: [
+                                { color: gradStart, offset: 0 },
+                                { color: c, offset: 1 },
+                              ],
+                            },
                           },
                         },
-                      })
+                        `node-grad-end:${selectedNode.id}`,
+                      )
                     }
                   />
                 </Field>
@@ -322,12 +501,16 @@ export function PropertiesPanel({
               disabled={readOnly}
               value={selectedNode.style.border.color}
               onValueChange={(c) =>
-                onUpdateNode(selectedNode.id, { style: { border: { color: c } } })
+                onUpdateNode(
+                  selectedNode.id,
+                  { style: { border: { color: c } } },
+                  `node-border-color:${selectedNode.id}`,
+                )
               }
             />
           </Field>
 
-          <div className="diagrav-prop-grid-2">
+          <div className={supportsRadius ? 'diagrav-prop-grid-2' : undefined}>
             <Field label="Width">
               <NumberInput
                 size="sm"
@@ -342,19 +525,21 @@ export function PropertiesPanel({
                 }
               />
             </Field>
-            <Field label="Radius">
-              <NumberInput
-                size="sm"
-                min={0}
-                max={48}
-                disabled={readOnly}
-                value={selectedNode.style.border.radius ?? 0}
-                onValueChange={(v) =>
-                  v !== null &&
-                  onUpdateNode(selectedNode.id, { style: { border: { radius: v } } })
-                }
-              />
-            </Field>
+            {supportsRadius && (
+              <Field label="Radius">
+                <NumberInput
+                  size="sm"
+                  min={0}
+                  max={48}
+                  disabled={readOnly}
+                  value={selectedNode.style.border.radius ?? 0}
+                  onValueChange={(v) =>
+                    v !== null &&
+                    onUpdateNode(selectedNode.id, { style: { border: { radius: v } } })
+                  }
+                />
+              </Field>
+            )}
           </div>
 
           <Switch
@@ -382,11 +567,11 @@ export function PropertiesPanel({
           <div className="diagrav-section-title">Label</div>
 
           <Field label="Text">
-            <Input
-              size="sm"
+            <DebouncedTextInput
+              key={selectedNode.id}
               disabled={readOnly}
               value={primaryLabel.text}
-              onValueChange={(text) => updatePrimaryLabel({ text })}
+              onCommit={(text) => updatePrimaryLabel({ text })}
             />
           </Field>
 
@@ -408,20 +593,57 @@ export function PropertiesPanel({
                 ]}
               />
             </Field>
-            <Field label="Position">
-              <Select
-                size="sm"
-                disabled={readOnly}
-                value={primaryLabel.placement.position}
-                onValueChange={(v) =>
-                  updatePrimaryLabel({
-                    placement: { position: v as NodeLabelPosition },
-                  })
-                }
-                options={NODE_LABEL_POS_OPTIONS}
-              />
-            </Field>
+            {primaryLabel.placement.model !== 'free' && (
+              <Field label="Position">
+                <Select
+                  size="sm"
+                  disabled={readOnly}
+                  value={primaryLabel.placement.position}
+                  onValueChange={(v) =>
+                    updatePrimaryLabel({
+                      placement: { position: v as NodeLabelPosition },
+                    })
+                  }
+                  options={NODE_LABEL_POS_OPTIONS}
+                />
+              </Field>
+            )}
           </div>
+
+          {primaryLabel.placement.model === 'free' && (
+            <div className="diagrav-prop-grid-2">
+              <Field label="Offset X">
+                <NumberInput
+                  size="sm"
+                  disabled={readOnly}
+                  value={Math.round(primaryLabel.placement.offset?.x ?? 0)}
+                  onValueChange={(v) =>
+                    v !== null &&
+                    updatePrimaryLabel({
+                      placement: {
+                        offset: { x: v, y: primaryLabel.placement.offset?.y ?? 0 },
+                      },
+                    })
+                  }
+                />
+              </Field>
+              <Field label="Offset Y">
+                <NumberInput
+                  size="sm"
+                  disabled={readOnly}
+                  value={Math.round(primaryLabel.placement.offset?.y ?? 0)}
+                  onValueChange={(v) =>
+                    v !== null &&
+                    updatePrimaryLabel({
+                      placement: {
+                        offset: { x: primaryLabel.placement.offset?.x ?? 0, y: v },
+                      },
+                    })
+                  }
+                />
+              </Field>
+            </div>
+          )}
 
           <div className="diagrav-prop-grid-2">
             <Field label="Font Size">
@@ -436,15 +658,27 @@ export function PropertiesPanel({
                 }
               />
             </Field>
-            <Field label="Text Color">
-              <ColorPicker
+            <Field label="Weight">
+              <Select
                 size="sm"
                 disabled={readOnly}
-                value={primaryLabel.style.color}
-                onValueChange={(color) => updatePrimaryLabel({ style: { color } })}
+                value={String(primaryLabel.style.fontWeight ?? 500)}
+                onValueChange={(v) => updatePrimaryLabel({ style: { fontWeight: Number(v) } })}
+                options={FONT_WEIGHT_OPTIONS}
               />
             </Field>
           </div>
+
+          <Field label="Text Color">
+            <ColorPicker
+              size="sm"
+              disabled={readOnly}
+              value={primaryLabel.style.color}
+              onValueChange={(color) =>
+                updatePrimaryLabel({ style: { color } }, `node-lbl-color:${selectedNode.id}`)
+              }
+            />
+          </Field>
         </Stack>
       </div>
     );
@@ -452,7 +686,7 @@ export function PropertiesPanel({
 
   // Edge properties
   const edge = selectedEdge!;
-  const edgeLabel = edge.labels[0] ?? createDefaultEdgeLabel('');
+  const edgeLabel = edge.labels[0] ?? FALLBACK_EDGE_LABEL;
 
   const updateEdgeLabel = (
     patch: {
@@ -460,22 +694,24 @@ export function PropertiesPanel({
       placement?: Partial<EdgeLabelPlacement>;
       style?: Partial<typeof edgeLabel.style>;
     },
+    mergeKey?: string,
   ) => {
+    const base = edge.labels[0] ?? createDefaultEdgeLabel('');
     const updated = {
-      ...edgeLabel,
-      text: patch.text ?? edgeLabel.text,
+      ...base,
+      text: patch.text ?? base.text,
       placement: patch.placement
-        ? { ...edgeLabel.placement, ...patch.placement }
-        : edgeLabel.placement,
-      style: patch.style ? { ...edgeLabel.style, ...patch.style } : edgeLabel.style,
+        ? { ...base.placement, ...patch.placement }
+        : base.placement,
+      style: patch.style ? { ...base.style, ...patch.style } : base.style,
     };
     const nextLabels =
       edge.labels.length > 0 ? [updated, ...edge.labels.slice(1)] : [updated];
-    onUpdateEdge(edge.id, { labels: nextLabels });
+    onUpdateEdge(edge.id, { labels: nextLabels }, mergeKey);
   };
 
   return (
-    <div className="diagrav-panel">
+    <div className="diagrav-panel diagrav-sidebar-panel">
       <Stack gap="item">
         <div className="diagrav-section-title">Connection</div>
 
@@ -495,7 +731,9 @@ export function PropertiesPanel({
               size="sm"
               disabled={readOnly}
               value={edge.style.stroke}
-              onValueChange={(stroke) => onUpdateEdge(edge.id, { style: { stroke } })}
+              onValueChange={(stroke) =>
+                onUpdateEdge(edge.id, { style: { stroke } }, `edge-stroke:${edge.id}`)
+              }
             />
           </Field>
           <Field label="Width">
@@ -561,11 +799,11 @@ export function PropertiesPanel({
         <div className="diagrav-section-title">Edge Label</div>
 
         <Field label="Text">
-          <Input
-            size="sm"
+          <DebouncedTextInput
+            key={edge.id}
             disabled={readOnly}
             value={edgeLabel.text}
-            onValueChange={(text) => updateEdgeLabel({ text })}
+            onCommit={(text) => updateEdgeLabel({ text })}
           />
         </Field>
 
@@ -584,10 +822,44 @@ export function PropertiesPanel({
                 { value: 'center', label: 'Center' },
                 { value: 'source', label: 'Source' },
                 { value: 'target', label: 'Target' },
+                { value: 'ratio', label: 'Ratio' },
                 { value: 'free', label: 'Free' },
               ]}
             />
           </Field>
+          <Field label="Distance">
+            <NumberInput
+              size="sm"
+              min={-60}
+              max={60}
+              step={2}
+              disabled={readOnly}
+              value={edgeLabel.placement.distance ?? -10}
+              onValueChange={(v) =>
+                v !== null && updateEdgeLabel({ placement: { distance: v } })
+              }
+            />
+          </Field>
+        </div>
+
+        {edgeLabel.placement.model === 'ratio' && (
+          <Field label="Ratio (0–1)">
+            <NumberInput
+              size="sm"
+              min={0}
+              max={1}
+              step={0.05}
+              disabled={readOnly}
+              value={edgeLabel.placement.ratio ?? 0.5}
+              onValueChange={(v) =>
+                v !== null &&
+                updateEdgeLabel({ placement: { ratio: Math.max(0, Math.min(1, v)) } })
+              }
+            />
+          </Field>
+        )}
+
+        <div className="diagrav-prop-grid-2">
           <Field label="Font Size">
             <NumberInput
               size="sm"
@@ -598,7 +870,28 @@ export function PropertiesPanel({
               onValueChange={(v) => v !== null && updateEdgeLabel({ style: { fontSize: v } })}
             />
           </Field>
+          <Field label="Text Color">
+            <ColorPicker
+              size="sm"
+              disabled={readOnly}
+              value={edgeLabel.style.color}
+              onValueChange={(color) =>
+                updateEdgeLabel({ style: { color } }, `edge-lbl-color:${edge.id}`)
+              }
+            />
+          </Field>
         </div>
+
+        <Field label="Background">
+          <ColorPicker
+            size="sm"
+            disabled={readOnly}
+            value={edgeLabel.style.background ?? '#ffffff'}
+            onValueChange={(background) =>
+              updateEdgeLabel({ style: { background } }, `edge-lbl-bg:${edge.id}`)
+            }
+          />
+        </Field>
       </Stack>
     </div>
   );

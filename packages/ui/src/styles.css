@@ -19,6 +19,15 @@ body,
   height: 100%;
   overflow-y: auto;
   padding: 12px;
+  box-sizing: border-box;
+}
+
+.diagrav-sidebar-panel {
+  width: 268px;
+  min-width: 268px;
+  max-width: 268px;
+  border-inline-end: 1px solid var(--j-border, #e2e8f0);
+  background: var(--j-surface-1, #ffffff);
 }
 
 .diagrav-palette-grid {
@@ -32,19 +41,29 @@ body,
   flex-direction: column;
   align-items: center;
   gap: 6px;
-  padding: 10px 6px;
+  padding: 9px 6px;
   border: 1px solid var(--j-border, #e2e8f0);
   border-radius: 8px;
-  background: var(--j-surface, #ffffff);
+  background: var(--j-surface-1, #ffffff);
   cursor: grab;
-  transition: border-color 150ms ease, background-color 150ms ease;
-  font-size: 12px;
+  transition: border-color 150ms ease, background-color 150ms ease, opacity 150ms ease;
+  font-size: 11.5px;
   color: var(--j-fg, #1e293b);
 }
 
-.diagrav-palette-item:hover {
+.diagrav-palette-item:hover:not(:disabled) {
   border-color: var(--j-accent, #2563eb);
-  background: var(--j-surface-subtle, #f1f5f9);
+  background: var(--j-surface-2, #f1f5f9);
+}
+
+.diagrav-palette-item:active:not(:disabled) {
+  cursor: grabbing;
+}
+
+.diagrav-palette-item:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  pointer-events: none;
 }
 
 .diagrav-prop-grid-2 {
@@ -59,7 +78,23 @@ body,
   letter-spacing: 0.05em;
   text-transform: uppercase;
   color: var(--j-fg-muted, #64748b);
-  margin: 4px 0;
+  margin: 2px 0;
+}
+
+.diagrav-shortcuts-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--j-fg-muted, #64748b);
+  line-height: 1.45;
+}
+
+.diagrav-shortcut-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 }
 
 .diagrav-statusbar {
@@ -67,9 +102,7 @@ body,
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 4px 12px;
+  width: 100%;
   font-size: 12px;
   color: var(--j-fg-muted, #64748b);
-  border-top: 1px solid var(--j-border, #e2e8f0);
-  background: var(--j-surface, #ffffff);
 }

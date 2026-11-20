@@ -2,6 +2,7 @@ import {
   Diagrav,
   createDefaultNode,
   validateDocument,
+  type DiagramCommand,
   type DiagramDocument,
   type EdgePatch,
   type EditorTool,
@@ -9,7 +10,7 @@ import {
   type SelectionState,
   type ShapeDefinition,
 } from '@diagrav/core';
-import { AppShell } from 'jenni-react';
+import { AppShell, Toaster, toast } from 'jenni-react';
 import { useEffect, useRef, useState } from 'react';
 import { EmbedDemo } from './components/EmbedDemo';
 import { PalettePanel } from './components/PalettePanel';
@@ -31,8 +32,10 @@ export function App() {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const diagravRef = useRef<Diagrav | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const clickCascadeRef = useRef(0);
 
   const [activeSampleId, setActiveSampleId] = useState<string>(SAMPLES[0].id);
+  const [customTitle, setCustomTitle] = useState<string | null>(null);
   const [doc, setDoc] = useState<DiagramDocument>(SAMPLES[0].document);
   const [selection, setSelection] = useState<SelectionState>({ nodeIds: [], edgeIds: [] });
   const [viewMode, setViewMode] = useState<AppViewMode>('editor');
@@ -46,7 +49,7 @@ export function App() {
     const instance = new Diagrav({
       container: hostRef.current,
       document: doc,
-      mode: viewMode === 'readonly' ? 'readonly' : 'editor',
+      mode: viewMode === 'editor' ? 'editor' : 'readonly',
     });
     diagravRef.current = instance;
     setShapes(instance.shapes.list());
@@ -56,7 +59,11 @@ export function App() {
     const unsubSel = instance.onSelectionChange((sel) => setSelection(sel));
     const unsubHist = instance.onHistoryChange((h) => setHistory(h));
 
+    // Frame initial sample nicely once layout dimensions settle
+    const raf = requestAnimationFrame(() => instance.fitToView(48));
+
     return () => {
+      cancelAnimationFrame(raf);
       unsubDoc();
       unsubSel();
       unsubHist();
@@ -69,16 +76,18 @@ export function App() {
 
   const handleViewModeChange = (next: AppViewMode) => {
     setViewMode(next);
-    if (next === 'editor' || next === 'readonly') {
-      diagravRef.current?.setMode(next);
-    }
+    // Keep hidden studio instance in readonly while viewing Embed Demo so shortcuts never leak
+    diagravRef.current?.setMode(next === 'editor' ? 'editor' : 'readonly');
   };
 
   const handleSelectSample = (sampleId: string) => {
     const sample = SAMPLES.find((s) => s.id === sampleId);
     if (!sample) return;
     setActiveSampleId(sampleId);
+    setCustomTitle(null);
+    clickCascadeRef.current = 0;
     diagravRef.current?.loadDocument(sample.document);
+    requestAnimationFrame(() => diagravRef.current?.fitToView(48));
   };
 
   const handleToolChange = (next: EditorTool) => {
@@ -95,10 +104,15 @@ export function App() {
   const handleAddShape = (shape: ShapeDefinition, worldPos?: { x: number; y: number }) => {
     const engine = diagravRef.current;
     if (!engine || viewMode !== 'editor') return;
-    const pos = worldPos ?? {
-      x: 180 + Math.round(Math.random() * 140),
-      y: 160 + Math.round(Math.random() * 100),
-    };
+
+    let pos = worldPos;
+    if (!pos) {
+      const center = engine.getViewportCenterWorld();
+      const offset = (clickCascadeRef.current % 5) * 24;
+      clickCascadeRef.current += 1;
+      pos = { x: center.x + offset, y: center.y + offset };
+    }
+
     const node = createDefaultNode({
       type: shape.type,
       labelText: shape.label,
@@ -121,38 +135,63 @@ export function App() {
     engine.interaction.selectNodes([node.id]);
   };
 
-  const handleUpdateNode = (id: string, patch: NodePatch) => {
-    diagravRef.current?.execute({ type: 'node.update', id, patch });
+  const handleUpdateNode = (id: string, patch: NodePatch, mergeKey?: string) => {
+    if (viewMode !== 'editor') return;
+    diagravRef.current?.execute({ type: 'node.update', id, patch }, mergeKey ? { mergeKey } : undefined);
   };
 
-  const handleUpdateEdge = (id: string, patch: EdgePatch) => {
-    diagravRef.current?.execute({ type: 'edge.update', id, patch });
+  const handleUpdateEdge = (id: string, patch: EdgePatch, mergeKey?: string) => {
+    if (viewMode !== 'editor') return;
+    diagravRef.current?.execute({ type: 'edge.update', id, patch }, mergeKey ? { mergeKey } : undefined);
+  };
+
+  const handleDeleteSelection = () => {
+    const engine = diagravRef.current;
+    if (!engine || viewMode !== 'editor') return;
+    const commands: DiagramCommand[] = [];
+    for (const id of selection.edgeIds) commands.push({ type: 'edge.delete', id });
+    for (const id of selection.nodeIds) commands.push({ type: 'node.delete', id });
+    if (commands.length === 0) return;
+    engine.execute({ type: 'batch', commands, label: 'Delete selection' });
+    engine.interaction.clearSelection();
   };
 
   const handleExportJson = () => {
     const current = diagravRef.current?.getDocument();
     if (!current) return;
     downloadText('diagram.diagrav.json', JSON.stringify(current, null, 2), 'application/json');
+    toast.success('Saved diagram.diagrav.json');
   };
 
   const handleExportSvg = () => {
     const svg = diagravRef.current?.exportSvg();
     if (!svg) return;
     downloadText('diagram.svg', svg, 'image/svg+xml');
+    toast.success('Exported diagram.svg');
   };
 
   const handleImportFile = async (file: File) => {
-    const text = await file.text();
-    const parsed = validateDocument(JSON.parse(text));
-    diagravRef.current?.loadDocument(parsed);
+    if (viewMode !== 'editor') return;
+    try {
+      const text = await file.text();
+      const parsed = validateDocument(JSON.parse(text));
+      diagravRef.current?.loadDocument(parsed);
+      setActiveSampleId('custom');
+      setCustomTitle(parsed.meta.title || file.name);
+      requestAnimationFrame(() => diagravRef.current?.fitToView(48));
+      toast.success(`Loaded ${file.name}`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Invalid .diagrav.json file';
+      toast.error(`Failed to open file: ${msg}`);
+    }
   };
 
   const selectedNode =
-    selection.nodeIds.length === 1
+    selection.nodeIds.length === 1 && selection.edgeIds.length === 0
       ? doc.nodes.find((n) => n.id === selection.nodeIds[0]) ?? null
       : null;
   const selectedEdge =
-    selection.edgeIds.length === 1
+    selection.edgeIds.length === 1 && selection.nodeIds.length === 0
       ? doc.edges.find((e) => e.id === selection.edgeIds[0]) ?? null
       : null;
 
@@ -171,10 +210,12 @@ export function App() {
           e.target.value = '';
         }}
       />
+      {/* Always keep layout="workspace" so AppShell never unmounts the Diagrav SVG host */}
       <AppShell
-        layout={isEmbed ? 'topnav' : 'workspace'}
+        layout="workspace"
         height="100vh"
-        asideWidth={230}
+        asideWidth={210}
+        asideLabel="Palette"
         sidebarOpen={!isEmbed}
         asideOpen={!isEmbed}
         topbar={
@@ -183,6 +224,7 @@ export function App() {
             onViewModeChange={handleViewModeChange}
             samples={SAMPLES}
             activeSampleId={activeSampleId}
+            customTitle={customTitle}
             onSelectSample={handleSelectSample}
             tool={tool}
             onToolChange={handleToolChange}
@@ -192,7 +234,7 @@ export function App() {
             onRedo={() => diagravRef.current?.redo()}
             showGrid={showGrid}
             onToggleGrid={handleToggleGrid}
-            onFitView={() => diagravRef.current?.fitToView()}
+            onFitView={() => diagravRef.current?.fitToView(48)}
             onExportJson={handleExportJson}
             onExportSvg={handleExportSvg}
             onImportJson={() => fileInputRef.current?.click()}
@@ -202,12 +244,14 @@ export function App() {
           !isEmbed ? (
             <PropertiesPanel
               doc={doc}
+              selection={selection}
               selectedNode={selectedNode}
               selectedEdge={selectedEdge}
               shapes={shapes}
               readOnly={viewMode === 'readonly'}
               onUpdateNode={handleUpdateNode}
               onUpdateEdge={handleUpdateEdge}
+              onDeleteSelection={handleDeleteSelection}
             />
           ) : undefined
         }
@@ -239,7 +283,10 @@ export function App() {
           className="diagrav-canvas-host"
           style={{ display: isEmbed ? 'none' : 'block' }}
           onDragOver={(e) => {
-            if (viewMode === 'editor') e.preventDefault();
+            if (viewMode === 'editor') {
+              e.preventDefault();
+              e.dataTransfer.dropEffect = 'copy';
+            }
           }}
           onDrop={(e) => {
             if (viewMode !== 'editor') return;
@@ -253,6 +300,7 @@ export function App() {
         />
         {isEmbed && <EmbedDemo />}
       </AppShell>
+      <Toaster position="bottom-right" />
     </>
   );
 }

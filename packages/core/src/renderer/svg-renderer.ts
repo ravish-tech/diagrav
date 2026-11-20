@@ -15,6 +15,7 @@ import type {
 } from '../schema/types.js';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
+let rendererInstanceSeq = 0;
 
 function el<K extends keyof SVGElementTagNameMap>(
   tag: K,
@@ -27,6 +28,11 @@ function el<K extends keyof SVGElementTagNameMap>(
   return node;
 }
 
+/** Safely serialize document JSON for embedding inside an SVG `<metadata>` text node. */
+export function serializeMetadataJson(doc: DiagramDocument): string {
+  return JSON.stringify(doc);
+}
+
 export interface RenderState {
   mode: DiagramMode;
   selectedNodeIds: Set<string>;
@@ -36,11 +42,15 @@ export interface RenderState {
   gridSize: number;
   draftEdge: { fromNodeId: string; toPoint: Point; targetNodeId: string | null } | null;
   snapLines: Array<{ orientation: 'vertical' | 'horizontal'; value: number }>;
+  /** Internal flag used during standalone SVG export to omit interactive hit paths. */
+  exportMode?: boolean;
 }
 
 export class SvgRenderer {
   readonly svg: SVGSVGElement;
+  private readonly idPrefix: string;
   private defs: SVGDefsElement;
+  private gridPattern: SVGPatternElement | null = null;
   private gridRect: SVGRectElement;
   private viewportGroup: SVGGElement;
   private edgesLayer: SVGGElement;
@@ -48,28 +58,37 @@ export class SvgRenderer {
   private overlayLayer: SVGGElement;
 
   constructor(
-    private container: HTMLElement,
+    private container: HTMLElement | null,
     private shapes: ShapeRegistry,
     private routers: EdgeRouterRegistry,
+    idPrefix?: string,
   ) {
+    rendererInstanceSeq += 1;
+    this.idPrefix = idPrefix ?? `dg_${rendererInstanceSeq}_`;
+
     this.svg = el('svg', {
       class: 'diagrav-svg',
       width: '100%',
       height: '100%',
+      role: 'application',
+      'aria-label': 'Diagrav diagram canvas',
+      tabindex: 0,
     });
     this.svg.style.display = 'block';
     this.svg.style.width = '100%';
     this.svg.style.height = '100%';
     this.svg.style.userSelect = 'none';
     this.svg.style.touchAction = 'none';
+    this.svg.style.outline = 'none';
 
     this.defs = el('defs');
     this.gridRect = el('rect', {
+      class: 'diagrav-grid-rect',
       x: 0,
       y: 0,
       width: '100%',
       height: '100%',
-      fill: 'url(#diagrav-grid-pattern)',
+      fill: `url(#${this.idPrefix}grid-pattern)`,
       'pointer-events': 'none',
     });
 
@@ -80,7 +99,9 @@ export class SvgRenderer {
 
     this.viewportGroup.append(this.edgesLayer, this.nodesLayer, this.overlayLayer);
     this.svg.append(this.defs, this.gridRect, this.viewportGroup);
-    this.container.appendChild(this.svg);
+    if (this.container) {
+      this.container.appendChild(this.svg);
+    }
   }
 
   destroy(): void {
@@ -105,6 +126,26 @@ export class SvgRenderer {
     };
   }
 
+  /** Fast-path update for viewport-only changes (pan/zoom) without rebuilding scene DOM. */
+  updateViewport(doc: DiagramDocument, state: RenderState): void {
+    const { x, y, zoom } = doc.viewport;
+    this.viewportGroup.setAttribute('transform', `translate(${x}, ${y}) scale(${zoom})`);
+
+    if (this.gridPattern) {
+      const step = state.gridSize * zoom;
+      const offsetX = ((x % step) + step) % step;
+      const offsetY = ((y % step) + step) % step;
+      this.gridPattern.setAttribute('width', String(step));
+      this.gridPattern.setAttribute('height', String(step));
+      this.gridPattern.setAttribute('x', String(offsetX));
+      this.gridPattern.setAttribute('y', String(offsetY));
+      const dot = this.gridPattern.firstElementChild;
+      if (dot) {
+        dot.setAttribute('r', String(Math.max(0.75, Math.min(1.5, zoom))));
+      }
+    }
+  }
+
   render(doc: DiagramDocument, state: RenderState): void {
     this.defs.innerHTML = '';
     this.edgesLayer.innerHTML = '';
@@ -113,7 +154,7 @@ export class SvgRenderer {
 
     // 1. Grid pattern + drop shadow filter
     this.renderBaseDefs(doc, state);
-    this.gridRect.setAttribute('display', state.showGrid ? 'inline' : 'none');
+    this.gridRect.setAttribute('display', state.showGrid && !state.exportMode ? 'inline' : 'none');
 
     // 2. Viewport transform
     const { x, y, zoom } = doc.viewport;
@@ -128,44 +169,49 @@ export class SvgRenderer {
       const src = nodeMap.get(edge.source.nodeId);
       const tgt = nodeMap.get(edge.target.nodeId);
       if (!src || !tgt) continue;
-      this.renderEdge(edge, src, tgt, state);
+      this.renderEdge(edge, src, tgt, doc, state);
     }
 
     // 4. Render nodes
     for (const node of doc.nodes) {
-      this.renderNode(node, state);
+      this.renderNode(node, doc, state);
     }
 
     // 5. Render overlays (draft edge, snap lines, selection handles)
-    if (state.mode === 'editor') {
+    if (state.mode === 'editor' && !state.exportMode) {
       this.renderOverlays(doc, nodeMap, state);
     }
   }
 
   private renderBaseDefs(doc: DiagramDocument, state: RenderState): void {
-    const step = state.gridSize * doc.viewport.zoom;
-    const offsetX = ((doc.viewport.x % step) + step) % step;
-    const offsetY = ((doc.viewport.y % step) + step) % step;
+    if (!state.exportMode) {
+      const step = state.gridSize * doc.viewport.zoom;
+      const offsetX = ((doc.viewport.x % step) + step) % step;
+      const offsetY = ((doc.viewport.y % step) + step) % step;
 
-    const pattern = el('pattern', {
-      id: 'diagrav-grid-pattern',
-      width: step,
-      height: step,
-      patternUnits: 'userSpaceOnUse',
-      x: offsetX,
-      y: offsetY,
-    });
-    const dot = el('circle', {
-      cx: 1,
-      cy: 1,
-      r: Math.max(0.75, Math.min(1.5, doc.viewport.zoom)),
-      fill: 'rgba(148, 163, 184, 0.35)',
-    });
-    pattern.appendChild(dot);
-    this.defs.appendChild(pattern);
+      const pattern = el('pattern', {
+        id: `${this.idPrefix}grid-pattern`,
+        width: step,
+        height: step,
+        patternUnits: 'userSpaceOnUse',
+        x: offsetX,
+        y: offsetY,
+      });
+      const dot = el('circle', {
+        cx: 1,
+        cy: 1,
+        r: Math.max(0.75, Math.min(1.5, doc.viewport.zoom)),
+        fill: 'rgba(148, 163, 184, 0.38)',
+      });
+      pattern.appendChild(dot);
+      this.defs.appendChild(pattern);
+      this.gridPattern = pattern;
+    } else {
+      this.gridPattern = null;
+    }
 
     const shadow = el('filter', {
-      id: 'diagrav-shadow',
+      id: `${this.idPrefix}shadow`,
       x: '-20%',
       y: '-20%',
       width: '140%',
@@ -187,7 +233,8 @@ export class SvgRenderer {
     if (fill.type === 'none') return { fill: 'none' };
     if (fill.type === 'solid') return { fill: fill.color, opacity: fill.opacity };
 
-    const gradId = `diagrav-grad-${nodeId}`;
+    const safeNodeId = nodeId.replace(/[^a-zA-Z0-9_-]/g, '_');
+    const gradId = `${this.idPrefix}grad-${safeNodeId}`;
     if (fill.type === 'linear-gradient') {
       const rad = ((fill.angle - 90) * Math.PI) / 180;
       const x1 = 50 - Math.cos(rad) * 50;
@@ -236,13 +283,17 @@ export class SvgRenderer {
   private ensureArrowMarker(type: ArrowType, color: string, end: 'start' | 'end'): string | undefined {
     if (type === 'none') return undefined;
     const safeColor = color.replace(/[^a-zA-Z0-9]/g, '');
-    const id = `diagrav-arrow-${type}-${end}-${safeColor}`;
+    const id = `${this.idPrefix}arrow-${type}-${end}-${safeColor}`;
     if (this.defs.querySelector(`#${id}`)) return `url(#${id})`;
+
+    // orient="auto-start-reverse" automatically flips marker-start 180deg,
+    // so refX stays at the arrow tip for both start and end markers.
+    const refX = type === 'circle' ? 6 : 10;
 
     const marker = el('marker', {
       id,
       viewBox: '0 0 12 12',
-      refX: end === 'end' ? 10 : 2,
+      refX,
       refY: 6,
       markerWidth: 8,
       markerHeight: 8,
@@ -281,11 +332,38 @@ export class SvgRenderer {
     return `url(#${id})`;
   }
 
-  private renderNode(node: DiagramNode, state: RenderState): void {
+  private renderMultilineText(
+    text: string,
+    x: number,
+    y: number,
+    fontSize: number,
+    attrs: Record<string, string | number | undefined>,
+  ): SVGTextElement {
+    const lines = text.split('\n');
+    const textEl = el('text', { x, y, ...attrs });
+    if (lines.length === 1) {
+      textEl.textContent = text;
+      return textEl;
+    }
+    const lineHeight = fontSize * 1.25;
+    const startOffset = -((lines.length - 1) * lineHeight) / 2;
+    lines.forEach((line, idx) => {
+      const tspan = el('tspan', {
+        x,
+        dy: idx === 0 ? startOffset : lineHeight,
+      });
+      tspan.textContent = line || ' ';
+      textEl.appendChild(tspan);
+    });
+    return textEl;
+  }
+
+  private renderNode(node: DiagramNode, doc: DiagramDocument, state: RenderState): void {
     const def = this.shapes.get(node.type);
-    const isSelected = state.selectedNodeIds.has(node.id);
-    const isHovered = state.hoveredNodeId === node.id;
+    const isSelected = !state.exportMode && state.selectedNodeIds.has(node.id);
+    const isHovered = !state.exportMode && state.hoveredNodeId === node.id;
     const { x, y, width, height, rotation = 0 } = node.geometry;
+    const invZoom = 1 / Math.max(0.15, doc.viewport.zoom);
 
     const g = el('g', {
       class: 'diagrav-node',
@@ -308,24 +386,37 @@ export class SvgRenderer {
       'stroke-width': isSelected ? Math.max(2, node.style.border.width) : node.style.border.width,
       'stroke-dasharray': node.style.border.dash?.length ? node.style.border.dash.join(' ') : undefined,
       'stroke-opacity': node.style.border.opacity ?? 1,
-      filter: node.style.shadow ? 'url(#diagrav-shadow)' : undefined,
+      filter: node.style.shadow ? `url(#${this.idPrefix}shadow)` : undefined,
     });
     g.appendChild(shapeEl);
 
-    // Subtle port anchor hint on hover in editor mode (yEd-style edge drag start)
-    if (state.mode === 'editor' && (isHovered || state.draftEdge?.targetNodeId === node.id)) {
-      const portRing = el('circle', {
-        class: 'diagrav-port-handle',
-        'data-port-node-id': node.id,
-        cx: width,
-        cy: height / 2,
-        r: 5,
-        fill: '#2563eb',
-        stroke: '#ffffff',
-        'stroke-width': 2,
-        cursor: 'crosshair',
-      });
-      g.appendChild(portRing);
+    // Subtle 4-side port handles on hover in editor mode (yEd-style edge drag start)
+    if (
+      state.mode === 'editor' &&
+      !state.exportMode &&
+      (isHovered || state.draftEdge?.targetNodeId === node.id)
+    ) {
+      const ports: Array<{ id: string; cx: number; cy: number }> = [
+        { id: 'n', cx: width / 2, cy: 0 },
+        { id: 'e', cx: width, cy: height / 2 },
+        { id: 's', cx: width / 2, cy: height },
+        { id: 'w', cx: 0, cy: height / 2 },
+      ];
+      for (const p of ports) {
+        const portRing = el('circle', {
+          class: 'diagrav-port-handle',
+          'data-port-node-id': node.id,
+          'data-port-side': p.id,
+          cx: p.cx,
+          cy: p.cy,
+          r: 5 * invZoom,
+          fill: '#2563eb',
+          stroke: '#ffffff',
+          'stroke-width': 2 * invZoom,
+          cursor: 'crosshair',
+        });
+        g.appendChild(portRing);
+      }
     }
 
     // Labels
@@ -334,18 +425,21 @@ export class SvgRenderer {
       const pos = computeNodeLabelPosition(node, label);
       const localX = pos.x - x;
       const localY = pos.y - y;
-      const textEl = el('text', {
-        x: localX,
-        y: localY,
-        'text-anchor': pos.textAnchor,
-        'dominant-baseline': pos.dominantBaseline,
-        fill: label.style.color,
-        'font-family': label.style.fontFamily ?? 'system-ui, sans-serif',
-        'font-size': label.style.fontSize,
-        'font-weight': label.style.fontWeight ?? 500,
-        'pointer-events': 'none',
-      });
-      textEl.textContent = label.text;
+      const textEl = this.renderMultilineText(
+        label.text,
+        localX,
+        localY,
+        label.style.fontSize,
+        {
+          'text-anchor': pos.textAnchor,
+          'dominant-baseline': pos.dominantBaseline,
+          fill: label.style.color,
+          'font-family': label.style.fontFamily ?? 'system-ui, sans-serif',
+          'font-size': label.style.fontSize,
+          'font-weight': label.style.fontWeight ?? 500,
+          'pointer-events': 'none',
+        },
+      );
       g.appendChild(textEl);
     }
 
@@ -356,11 +450,13 @@ export class SvgRenderer {
     edge: DiagramEdge,
     source: DiagramNode,
     target: DiagramNode,
+    doc: DiagramDocument,
     state: RenderState,
   ): void {
     const router = this.routers.get(edge.routing);
     const routed = router.route(source, target, edge, this.shapes);
-    const isSelected = state.selectedEdgeIds.has(edge.id);
+    const isSelected = !state.exportMode && state.selectedEdgeIds.has(edge.id);
+    const invZoom = 1 / Math.max(0.15, doc.viewport.zoom);
 
     const g = el('g', {
       class: 'diagrav-edge',
@@ -369,16 +465,18 @@ export class SvgRenderer {
 
     const strokeColor = isSelected ? '#2563eb' : edge.style.stroke;
 
-    // Wide invisible hit area for easy clicking & bend insertion
-    const hitPath = el('path', {
-      d: routed.pathD,
-      fill: 'none',
-      stroke: 'transparent',
-      'stroke-width': 14,
-      cursor: state.mode === 'editor' ? 'pointer' : 'default',
-      'data-edge-hit-id': edge.id,
-    });
-    g.appendChild(hitPath);
+    // Wide invisible hit area for easy clicking & bend insertion (omitted during SVG export)
+    if (!state.exportMode) {
+      const hitPath = el('path', {
+        d: routed.pathD,
+        fill: 'none',
+        stroke: 'transparent',
+        'stroke-width': Math.max(12, 14 * invZoom),
+        cursor: state.mode === 'editor' ? 'pointer' : 'default',
+        'data-edge-hit-id': edge.id,
+      });
+      g.appendChild(hitPath);
+    }
 
     const visiblePath = el('path', {
       d: routed.pathD,
@@ -400,40 +498,61 @@ export class SvgRenderer {
       if (!label.text) continue;
       const pos = computeEdgeLabelPosition(routed.points, label);
       const pad = label.style.padding ?? 3;
-      const approxW = Math.max(24, label.text.length * (label.style.fontSize * 0.58) + pad * 2);
-      const approxH = label.style.fontSize + pad * 2;
+      const lines = label.text.split('\n');
+      const maxLineLen = Math.max(...lines.map((l) => l.length));
+      const approxW = Math.max(24, maxLineLen * (label.style.fontSize * 0.62) + pad * 2 + 4);
+      const approxH = lines.length * label.style.fontSize * 1.25 + pad * 2;
 
+      let bgRect: SVGRectElement | null = null;
       if (label.style.background) {
-        g.appendChild(
-          el('rect', {
-            x: pos.x - approxW / 2,
-            y: pos.y - approxH / 2,
-            width: approxW,
-            height: approxH,
-            rx: 4,
-            fill: label.style.background,
-            'pointer-events': 'none',
-          }),
-        );
+        bgRect = el('rect', {
+          x: pos.x - approxW / 2,
+          y: pos.y - approxH / 2,
+          width: approxW,
+          height: approxH,
+          rx: 4,
+          fill: label.style.background,
+          'pointer-events': 'none',
+        });
+        g.appendChild(bgRect);
       }
 
-      const textEl = el('text', {
-        x: pos.x,
-        y: pos.y,
-        'text-anchor': pos.textAnchor,
-        'dominant-baseline': pos.dominantBaseline,
-        fill: label.style.color,
-        'font-family': label.style.fontFamily ?? 'system-ui, sans-serif',
-        'font-size': label.style.fontSize,
-        'font-weight': label.style.fontWeight ?? 500,
-        'pointer-events': 'none',
-      });
-      textEl.textContent = label.text;
+      const textEl = this.renderMultilineText(
+        label.text,
+        pos.x,
+        pos.y,
+        label.style.fontSize,
+        {
+          'text-anchor': pos.textAnchor,
+          'dominant-baseline': pos.dominantBaseline,
+          fill: label.style.color,
+          'font-family': label.style.fontFamily ?? 'system-ui, sans-serif',
+          'font-size': label.style.fontSize,
+          'font-weight': label.style.fontWeight ?? 500,
+          'pointer-events': 'none',
+        },
+      );
       g.appendChild(textEl);
+
+      // Refine pill background using real measured text bbox when attached to DOM
+      if (bgRect && this.svg.isConnected) {
+        this.edgesLayer.appendChild(g);
+        try {
+          const bbox = textEl.getBBox();
+          if (bbox.width > 0 && bbox.height > 0) {
+            bgRect.setAttribute('x', String(bbox.x - pad - 2));
+            bgRect.setAttribute('y', String(bbox.y - pad));
+            bgRect.setAttribute('width', String(bbox.width + pad * 2 + 4));
+            bgRect.setAttribute('height', String(bbox.height + pad * 2));
+          }
+        } catch {
+          // Fallback to estimated dimensions if SVG is hidden/unmeasured
+        }
+      }
     }
 
     // Bend handles when selected in editor mode
-    if (state.mode === 'editor' && isSelected) {
+    if (state.mode === 'editor' && !state.exportMode && isSelected) {
       edge.bends.forEach((bend, idx) => {
         const handle = el('circle', {
           class: 'diagrav-bend-handle',
@@ -441,17 +560,19 @@ export class SvgRenderer {
           'data-bend-index': idx,
           cx: bend.x,
           cy: bend.y,
-          r: 5,
+          r: 5 * invZoom,
           fill: '#ffffff',
           stroke: '#2563eb',
-          'stroke-width': 2,
+          'stroke-width': 2 * invZoom,
           cursor: 'grab',
         });
         g.appendChild(handle);
       });
     }
 
-    this.edgesLayer.appendChild(g);
+    if (!g.parentNode) {
+      this.edgesLayer.appendChild(g);
+    }
   }
 
   private renderOverlays(
@@ -459,6 +580,8 @@ export class SvgRenderer {
     nodeMap: Map<string, DiagramNode>,
     state: RenderState,
   ): void {
+    const invZoom = 1 / Math.max(0.15, doc.viewport.zoom);
+
     // Snap lines
     for (const line of state.snapLines) {
       if (line.orientation === 'vertical') {
@@ -469,8 +592,8 @@ export class SvgRenderer {
             x2: line.value,
             y2: 10000,
             stroke: '#3b82f6',
-            'stroke-width': 1 / doc.viewport.zoom,
-            'stroke-dasharray': `${4 / doc.viewport.zoom} ${4 / doc.viewport.zoom}`,
+            'stroke-width': invZoom,
+            'stroke-dasharray': `${4 * invZoom} ${4 * invZoom}`,
             'pointer-events': 'none',
           }),
         );
@@ -482,20 +605,22 @@ export class SvgRenderer {
             x2: 10000,
             y2: line.value,
             stroke: '#3b82f6',
-            'stroke-width': 1 / doc.viewport.zoom,
-            'stroke-dasharray': `${4 / doc.viewport.zoom} ${4 / doc.viewport.zoom}`,
+            'stroke-width': invZoom,
+            'stroke-dasharray': `${4 * invZoom} ${4 * invZoom}`,
             'pointer-events': 'none',
           }),
         );
       }
     }
 
-    // Resize handles for single selected node
+    // Resize handles for single selected node (zoom-invariant size)
     if (state.selectedNodeIds.size === 1) {
       const id = Array.from(state.selectedNodeIds)[0];
       const node = nodeMap.get(id);
       if (node) {
         const { x, y, width: w, height: h } = node.geometry;
+        const size = 8 * invZoom;
+        const half = size / 2;
         const handles: Array<{ dir: string; hx: number; hy: number; cursor: string }> = [
           { dir: 'nw', hx: x, hy: y, cursor: 'nwse-resize' },
           { dir: 'n', hx: x + w / 2, hy: y, cursor: 'ns-resize' },
@@ -512,14 +637,14 @@ export class SvgRenderer {
               class: 'diagrav-resize-handle',
               'data-resize-node-id': node.id,
               'data-resize-dir': hd.dir,
-              x: hd.hx - 4,
-              y: hd.hy - 4,
-              width: 8,
-              height: 8,
-              rx: 2,
+              x: hd.hx - half,
+              y: hd.hy - half,
+              width: size,
+              height: size,
+              rx: 2 * invZoom,
               fill: '#ffffff',
               stroke: '#2563eb',
-              'stroke-width': 1.5,
+              'stroke-width': 1.5 * invZoom,
               cursor: hd.cursor,
             }),
           );
@@ -548,8 +673,8 @@ export class SvgRenderer {
             x2: end.x,
             y2: end.y,
             stroke: '#2563eb',
-            'stroke-width': 2,
-            'stroke-dasharray': '5 4',
+            'stroke-width': 2 * invZoom,
+            'stroke-dasharray': `${5 * invZoom} ${4 * invZoom}`,
             'pointer-events': 'none',
           }),
         );
@@ -558,33 +683,83 @@ export class SvgRenderer {
   }
 
   exportSvg(doc: DiagramDocument): string {
-    const clone = this.svg.cloneNode(true) as SVGSVGElement;
-    clone.setAttribute('xmlns', SVG_NS);
-    // Remove grid & overlays from exported SVG
-    clone.querySelector('.diagrav-overlay')?.remove();
-    clone.querySelector('rect[fill="url(#diagrav-grid-pattern)"]')?.remove();
+    // Render into a clean detached SVG with zero selection/editor artifacts
+    const cleanRenderer = new SvgRenderer(null, this.shapes, this.routers, 'dg_exp_');
+    const cleanDoc: DiagramDocument = {
+      ...doc,
+      viewport: { x: 0, y: 0, zoom: 1 },
+    };
+    cleanRenderer.render(cleanDoc, {
+      mode: 'readonly',
+      selectedNodeIds: new Set(),
+      selectedEdgeIds: new Set(),
+      hoveredNodeId: null,
+      showGrid: false,
+      gridSize: 10,
+      draftEdge: null,
+      snapLines: [],
+      exportMode: true,
+    });
 
-    // Compute tight bounding box
+    const exportSvg = cleanRenderer.svg;
+    exportSvg.setAttribute('xmlns', SVG_NS);
+    exportSvg.removeAttribute('style');
+    exportSvg.removeAttribute('tabindex');
+    exportSvg.removeAttribute('role');
+    exportSvg.querySelector('.diagrav-overlay')?.remove();
+    exportSvg.querySelector('.diagrav-grid-rect')?.remove();
+    exportSvg.querySelector('.diagrav-viewport')?.removeAttribute('transform');
+
+    // Compute accurate bounding box covering nodes, routed edges, bends, and labels
+    const nodeMap = new Map<string, DiagramNode>();
     let minX = Infinity;
     let minY = Infinity;
     let maxX = -Infinity;
     let maxY = -Infinity;
+
+    const expand = (x: number, y: number) => {
+      if (x < minX) minX = x;
+      if (y < minY) minY = y;
+      if (x > maxX) maxX = x;
+      if (y > maxY) maxY = y;
+    };
+
     for (const n of doc.nodes) {
-      minX = Math.min(minX, n.geometry.x);
-      minY = Math.min(minY, n.geometry.y);
-      maxX = Math.max(maxX, n.geometry.x + n.geometry.width);
-      maxY = Math.max(maxY, n.geometry.y + n.geometry.height);
-    }
-    for (const e of doc.edges) {
-      for (const b of e.bends) {
-        minX = Math.min(minX, b.x);
-        minY = Math.min(minY, b.y);
-        maxX = Math.max(maxX, b.x);
-        maxY = Math.max(maxY, b.y);
+      nodeMap.set(n.id, n);
+      const margin = n.style.shadow ? 12 : 4;
+      expand(n.geometry.x - margin, n.geometry.y - margin);
+      expand(n.geometry.x + n.geometry.width + margin, n.geometry.y + n.geometry.height + margin);
+      for (const lbl of n.labels) {
+        if (!lbl.text) continue;
+        const pos = computeNodeLabelPosition(n, lbl);
+        const halfW = (lbl.text.length * lbl.style.fontSize * 0.62) / 2;
+        const halfH = lbl.style.fontSize * 0.8;
+        expand(pos.x - halfW, pos.y - halfH);
+        expand(pos.x + halfW, pos.y + halfH);
       }
     }
 
-    const pad = 32;
+    for (const e of doc.edges) {
+      const src = nodeMap.get(e.source.nodeId);
+      const tgt = nodeMap.get(e.target.nodeId);
+      if (src && tgt) {
+        const routed = this.routers.get(e.routing).route(src, tgt, e, this.shapes);
+        for (const p of routed.points) {
+          expand(p.x - 8, p.y - 8);
+          expand(p.x + 8, p.y + 8);
+        }
+        for (const lbl of e.labels) {
+          if (!lbl.text) continue;
+          const pos = computeEdgeLabelPosition(routed.points, lbl);
+          const halfW = (lbl.text.length * lbl.style.fontSize * 0.62) / 2 + 6;
+          const halfH = lbl.style.fontSize * 0.8 + 6;
+          expand(pos.x - halfW, pos.y - halfH);
+          expand(pos.x + halfW, pos.y + halfH);
+        }
+      }
+    }
+
+    const pad = 28;
     if (!Number.isFinite(minX)) {
       minX = 0;
       minY = 0;
@@ -596,13 +771,16 @@ export class SvgRenderer {
     const vbW = Math.ceil(maxX - minX + pad * 2);
     const vbH = Math.ceil(maxY - minY + pad * 2);
 
-    clone.setAttribute('viewBox', `${vbX} ${vbY} ${vbW} ${vbH}`);
-    clone.setAttribute('width', String(vbW));
-    clone.setAttribute('height', String(vbH));
-    const vp = clone.querySelector('.diagrav-viewport');
-    if (vp) vp.removeAttribute('transform');
+    exportSvg.setAttribute('viewBox', `${vbX} ${vbY} ${vbW} ${vbH}`);
+    exportSvg.setAttribute('width', String(vbW));
+    exportSvg.setAttribute('height', String(vbH));
 
-    const serialized = new XMLSerializer().serializeToString(clone);
-    return `<!-- diagrav:v1 ${JSON.stringify(doc)} -->\n${serialized}`;
+    // Embed canonical JSON safely inside <metadata> text node (XMLSerializer escapes <, >, & safely)
+    const metadata = document.createElementNS(SVG_NS, 'metadata');
+    metadata.setAttribute('data-diagrav-version', '1');
+    metadata.textContent = serializeMetadataJson(doc);
+    exportSvg.insertBefore(metadata, exportSvg.firstChild);
+
+    return new XMLSerializer().serializeToString(exportSvg);
   }
 }

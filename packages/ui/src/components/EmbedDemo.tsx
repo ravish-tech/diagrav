@@ -1,5 +1,15 @@
 import { Diagrav, type DiagramDocument } from '@diagrav/core';
-import { Badge, Button, Card, Container, Grid, GridItem, Inline, Stack } from 'jenni-react';
+import {
+  Badge,
+  Button,
+  Card,
+  Container,
+  Grid,
+  GridItem,
+  Inline,
+  Stack,
+  toast,
+} from 'jenni-react';
 import { useEffect, useRef } from 'react';
 import { PIPELINE_SAMPLE, TOPOLOGY_SAMPLE } from '../samples';
 
@@ -16,16 +26,25 @@ function EmbeddedViewerCard({
   const instanceRef = useRef<Diagrav | null>(null);
 
   useEffect(() => {
-    if (!hostRef.current) return;
+    const host = hostRef.current;
+    if (!host) return;
     const viewer = new Diagrav({
-      container: hostRef.current,
+      container: host,
       document,
       mode: 'readonly',
+      readonlySelectable: false,
     });
     instanceRef.current = viewer;
-    viewer.fitToView(24);
+
+    const raf = requestAnimationFrame(() => viewer.fitToView(24));
+    const ro = new ResizeObserver(() => {
+      viewer.fitToView(24);
+    });
+    ro.observe(host);
 
     return () => {
+      cancelAnimationFrame(raf);
+      ro.disconnect();
       viewer.destroy();
       instanceRef.current = null;
     };
@@ -69,16 +88,28 @@ const viewer = new Diagrav({
   container: document.getElementById('diagram'),
   document: myDiagramJson,
   mode: 'readonly', // pan, zoom, inspect — zero UI framework needed
+  readonlySelectable: false,
 });
 viewer.fitToView();`;
 
 export function EmbedDemo() {
+  const handleCopySnippet = async () => {
+    try {
+      await navigator.clipboard.writeText(EMBED_SNIPPET);
+      toast.success('Copied embed snippet');
+    } catch {
+      toast.error('Unable to copy to clipboard');
+    }
+  };
+
   return (
     <div style={{ height: '100%', overflowY: 'auto', padding: '24px 0' }}>
       <Container size="lg">
         <Stack gap="group">
           <div>
-            <h2 style={{ margin: '0 0 6px', fontSize: 20 }}>Embeddable Core Engine</h2>
+            <h1 style={{ margin: '0 0 6px', fontSize: 22, fontWeight: 600 }}>
+              Embeddable Core Engine
+            </h1>
             <p style={{ margin: 0, fontSize: 14, color: 'var(--j-fg-muted, #64748b)' }}>
               Each card below mounts an independent <code>@diagrav/core</code> instance in{' '}
               <code>readonly</code> mode. Drag to pan, scroll to zoom.
@@ -104,7 +135,14 @@ export function EmbedDemo() {
 
           <Card variant="surface" style={{ padding: 16 }}>
             <Stack gap="related">
-              <strong style={{ fontSize: 13 }}>Minimal Embed Code (Plain HTML / Any Framework)</strong>
+              <Inline justify="between" align="center">
+                <strong style={{ fontSize: 13 }}>
+                  Minimal Embed Code (Plain HTML / Any Framework)
+                </strong>
+                <Button size="sm" variant="outline" onClick={() => void handleCopySnippet()}>
+                  Copy Snippet
+                </Button>
+              </Inline>
               <pre
                 style={{
                   margin: 0,

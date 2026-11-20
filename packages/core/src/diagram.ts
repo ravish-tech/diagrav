@@ -1,4 +1,9 @@
-import { CommandEngine, type EngineListener, type HistoryListener } from './commands/engine.js';
+import {
+  CommandEngine,
+  type EngineListener,
+  type ExecuteOptions,
+  type HistoryListener,
+} from './commands/engine.js';
 import type { CommandResult, DiagramCommand } from './commands/types.js';
 import { EdgeRouterRegistry } from './registries/edges.js';
 import { ShapeRegistry } from './registries/shapes.js';
@@ -19,6 +24,8 @@ export interface DiagravOptions {
   container: HTMLElement;
   document?: DiagramDocument;
   mode?: DiagramMode;
+  /** Whether clicking elements selects them in readonly mode (default: true). */
+  readonlySelectable?: boolean;
   shapes?: ShapeRegistry;
   routers?: EdgeRouterRegistry;
 }
@@ -34,6 +41,7 @@ export class Diagrav {
   readonly renderer: SvgRenderer;
   readonly interaction: InteractionController;
   private unsubChange: () => void;
+  private lastDocRef: DiagramDocument;
 
   constructor(options: DiagravOptions) {
     this.shapes = options.shapes ?? new ShapeRegistry();
@@ -46,17 +54,28 @@ export class Diagrav {
       this.shapes,
       this.routers,
       options.mode ?? 'editor',
+      options.readonlySelectable ?? true,
     );
 
+    this.lastDocRef = this.engine.getDocument();
     this.unsubChange = this.engine.onChange((doc) => {
-      this.renderer.render(doc, this.interaction.getRenderState());
+      const state = this.interaction.getRenderState();
+      const prev = this.lastDocRef;
+      this.lastDocRef = doc;
+      // Fast-path viewport-only pan updates (and zoom in readonly mode, which has no handles)
+      const viewportOnly = doc.nodes === prev.nodes && doc.edges === prev.edges;
+      if (viewportOnly && (doc.viewport.zoom === prev.viewport.zoom || state.mode === 'readonly')) {
+        this.renderer.updateViewport(doc, state);
+      } else {
+        this.renderer.render(doc, state);
+      }
     });
 
-    this.renderer.render(this.engine.getDocument(), this.interaction.getRenderState());
+    this.renderer.render(this.lastDocRef, this.interaction.getRenderState());
   }
 
-  execute(command: DiagramCommand): CommandResult {
-    return this.engine.execute(command);
+  execute(command: DiagramCommand, options?: ExecuteOptions): CommandResult {
+    return this.engine.execute(command, options);
   }
 
   getDocument(): DiagramDocument {
@@ -108,7 +127,17 @@ export class Diagrav {
     return this.renderer.screenToWorld(clientX, clientY, this.engine.getDocument());
   }
 
+  getViewportCenterWorld(): Point {
+    const rect = this.renderer.svg.getBoundingClientRect();
+    const cx = rect.left + rect.width / 2;
+    const cy = rect.top + rect.height / 2;
+    return this.renderer.screenToWorld(cx, cy, this.engine.getDocument());
+  }
+
   fitToView(padding = 48): void {
+    const rect = this.renderer.svg.getBoundingClientRect();
+    if (rect.width < 10 || rect.height < 10) return;
+
     const doc = this.engine.getDocument();
     if (doc.nodes.length === 0) {
       this.engine.execute({
@@ -129,13 +158,20 @@ export class Diagrav {
       maxX = Math.max(maxX, n.geometry.x + n.geometry.width);
       maxY = Math.max(maxY, n.geometry.y + n.geometry.height);
     }
+    for (const e of doc.edges) {
+      for (const b of e.bends) {
+        minX = Math.min(minX, b.x);
+        minY = Math.min(minY, b.y);
+        maxX = Math.max(maxX, b.x);
+        maxY = Math.max(maxY, b.y);
+      }
+    }
 
-    const rect = this.renderer.svg.getBoundingClientRect();
     const contentW = Math.max(1, maxX - minX);
     const contentH = Math.max(1, maxY - minY);
     const availW = Math.max(1, rect.width - padding * 2);
     const availH = Math.max(1, rect.height - padding * 2);
-    const zoom = Math.max(0.2, Math.min(1.5, Math.min(availW / contentW, availH / contentH)));
+    const zoom = Math.max(0.2, Math.min(1.25, Math.min(availW / contentW, availH / contentH)));
     const x = (rect.width - contentW * zoom) / 2 - minX * zoom;
     const y = (rect.height - contentH * zoom) / 2 - minY * zoom;
 

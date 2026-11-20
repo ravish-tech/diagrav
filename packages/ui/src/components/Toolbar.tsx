@@ -6,6 +6,7 @@ import {
   SegmentedControl,
   Select,
   Separator,
+  Tooltip,
   TopBar,
 } from 'jenni-react';
 import type { SampleEntry } from '../samples';
@@ -17,6 +18,7 @@ export interface ToolbarProps {
   onViewModeChange: (mode: AppViewMode) => void;
   samples: SampleEntry[];
   activeSampleId: string;
+  customTitle?: string | null;
   onSelectSample: (sampleId: string) => void;
   tool: EditorTool;
   onToolChange: (tool: EditorTool) => void;
@@ -37,6 +39,7 @@ export function Toolbar({
   onViewModeChange,
   samples,
   activeSampleId,
+  customTitle,
   onSelectSample,
   tool,
   onToolChange,
@@ -51,12 +54,21 @@ export function Toolbar({
   onExportSvg,
   onImportJson,
 }: ToolbarProps) {
+  const sampleOptions = [
+    ...samples.map((s) => ({ value: s.id, label: s.name })),
+    ...(activeSampleId === 'custom'
+      ? [{ value: 'custom', label: customTitle || 'Imported JSON' }]
+      : []),
+  ];
+
   return (
     <TopBar
       sticky
       start={
-        <Inline gap="related" align="center">
-          <strong style={{ fontSize: 15, letterSpacing: '-0.02em' }}>Diagrav</strong>
+        <Inline gap="inline" align="center" style={{ flexWrap: 'nowrap' }}>
+          <strong style={{ fontSize: 15, letterSpacing: '-0.02em', whiteSpace: 'nowrap' }}>
+            Diagrav
+          </strong>
           <Badge variant="soft" tone="accent" size="sm">
             v0.1
           </Badge>
@@ -66,14 +78,14 @@ export function Toolbar({
               aria-label="Sample diagram"
               value={activeSampleId}
               onValueChange={onSelectSample}
-              options={samples.map((s) => ({ value: s.id, label: s.name }))}
-              style={{ width: 175 }}
+              options={sampleOptions}
+              style={{ width: 158 }}
             />
           )}
         </Inline>
       }
       center={
-        <Inline gap="related" align="center">
+        <Inline gap="inline" align="center" style={{ flexWrap: 'nowrap' }}>
           <SegmentedControl
             size="sm"
             value={viewMode}
@@ -81,12 +93,12 @@ export function Toolbar({
             options={[
               { value: 'editor', label: 'Editor' },
               { value: 'readonly', label: 'Readonly' },
-              { value: 'embed', label: 'Embed Demo' },
+              { value: 'embed', label: 'Embed' },
             ]}
           />
           {viewMode === 'editor' && (
             <>
-              <Separator orientation="vertical" style={{ height: 20 }} />
+              <Separator orientation="vertical" style={{ height: 18 }} />
               <SegmentedControl
                 size="sm"
                 value={tool}
@@ -96,40 +108,51 @@ export function Toolbar({
                   { value: 'edge', label: 'Connect' },
                 ]}
               />
-              <Separator orientation="vertical" style={{ height: 20 }} />
-              <Button size="sm" variant="ghost" disabled={!canUndo} onClick={onUndo}>
-                Undo
-              </Button>
-              <Button size="sm" variant="ghost" disabled={!canRedo} onClick={onRedo}>
-                Redo
-              </Button>
+              <Separator orientation="vertical" style={{ height: 18 }} />
+              <Tooltip content="Undo (Cmd+Z)">
+                <Button size="sm" variant="ghost" disabled={!canUndo} onClick={onUndo}>
+                  Undo
+                </Button>
+              </Tooltip>
+              <Tooltip content="Redo (Cmd+Shift+Z)">
+                <Button size="sm" variant="ghost" disabled={!canRedo} onClick={onRedo}>
+                  Redo
+                </Button>
+              </Tooltip>
             </>
           )}
           {viewMode !== 'embed' && (
             <>
-              <Separator orientation="vertical" style={{ height: 20 }} />
-              <Button
-                size="sm"
-                variant={showGrid ? 'soft' : 'ghost'}
-                onClick={onToggleGrid}
-              >
-                Grid
-              </Button>
-              <Button size="sm" variant="ghost" onClick={onFitView}>
-                Fit
-              </Button>
+              <Separator orientation="vertical" style={{ height: 18 }} />
+              <Tooltip content="Toggle snap grid">
+                <Button
+                  size="sm"
+                  variant={showGrid ? 'soft' : 'ghost'}
+                  aria-pressed={showGrid}
+                  onClick={onToggleGrid}
+                >
+                  Grid
+                </Button>
+              </Tooltip>
+              <Tooltip content="Fit diagram to viewport">
+                <Button size="sm" variant="ghost" onClick={onFitView}>
+                  Fit
+                </Button>
+              </Tooltip>
             </>
           )}
         </Inline>
       }
       end={
         viewMode !== 'embed' ? (
-          <Inline gap="inline" align="center">
-            <Button size="sm" variant="outline" onClick={onImportJson}>
-              Open JSON
-            </Button>
+          <Inline gap="inline" align="center" style={{ flexWrap: 'nowrap' }}>
+            {viewMode === 'editor' && (
+              <Button size="sm" variant="outline" onClick={onImportJson}>
+                Open
+              </Button>
+            )}
             <Button size="sm" variant="outline" onClick={onExportJson}>
-              Save JSON
+              JSON
             </Button>
             <Button size="sm" variant="solid" onClick={onExportSvg}>
               Export SVG

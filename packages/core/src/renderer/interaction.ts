@@ -1,11 +1,14 @@
 import type { CommandEngine } from '../commands/engine.js';
 import type { DiagramCommand } from '../commands/types.js';
-import type { EdgeRouterRegistry } from '../registries/edges.js';
+import { pointAlongPolyline, type EdgeRouterRegistry } from '../registries/edges.js';
+import { computeEdgeLabelPosition, computeNodeLabelPosition } from '../registries/labels.js';
 import type { ShapeRegistry } from '../registries/shapes.js';
 import {
   createDefaultEdge,
   createDefaultEdgeLabel,
   createDefaultNodeLabel,
+  generateId,
+  type DiagramEdge,
   type DiagramMode,
   type DiagramNode,
   type EditorTool,
@@ -34,16 +37,29 @@ type DragSession =
       dir: string;
       startWorld: Point;
       orig: { x: number; y: number; width: number; height: number };
+      moved: boolean;
     }
   | {
       kind: 'create-edge';
       fromNodeId: string;
     }
   | {
+      kind: 'pending-bend';
+      edgeId: string;
+      startClientX: number;
+      startClientY: number;
+      insertIndex: number;
+      origBends: Point[];
+      origRouting: DiagramEdge['routing'];
+    }
+  | {
       kind: 'move-bend';
       edgeId: string;
       bendIndex: number;
       origBends: Point[];
+      origRouting: DiagramEdge['routing'];
+      isNewBend: boolean;
+      moved: boolean;
     };
 
 function distToSegment(p: Point, a: Point, b: Point): number {
@@ -55,8 +71,17 @@ function distToSegment(p: Point, a: Point, b: Point): number {
   return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy));
 }
 
+function pointsEqual(a: Point[], b: Point[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i].x !== b[i].x || a[i].y !== b[i].y) return false;
+  }
+  return true;
+}
+
 export class InteractionController {
   private mode: DiagramMode;
+  private readonlySelectable: boolean;
   private tool: EditorTool = 'select';
   private snapToGrid = true;
   private gridSize = 10;
@@ -76,8 +101,10 @@ export class InteractionController {
     private shapes: ShapeRegistry,
     private routers: EdgeRouterRegistry,
     initialMode: DiagramMode = 'editor',
+    readonlySelectable = true,
   ) {
     this.mode = initialMode;
+    this.readonlySelectable = readonlySelectable;
     this.bindEvents();
   }
 
@@ -101,8 +128,10 @@ export class InteractionController {
   setMode(mode: DiagramMode): void {
     this.mode = mode;
     if (mode === 'readonly') {
+      this.abortDrag();
       this.draftEdge = null;
       this.snapLines = [];
+      this.hoveredNodeId = null;
       this.closeInlineEditor(false);
     }
     this.redraw();
@@ -161,11 +190,14 @@ export class InteractionController {
   }
 
   destroy(): void {
+    this.abortDrag();
     this.closeInlineEditor(false);
     const svg = this.renderer.svg;
     svg.removeEventListener('pointerdown', this.onPointerDown);
     window.removeEventListener('pointermove', this.onPointerMove);
     window.removeEventListener('pointerup', this.onPointerUp);
+    window.removeEventListener('pointercancel', this.onPointerCancel);
+    window.removeEventListener('blur', this.onWindowBlur);
     svg.removeEventListener('wheel', this.onWheel);
     svg.removeEventListener('dblclick', this.onDoubleClick);
     window.removeEventListener('keydown', this.onKeyDown);
@@ -176,6 +208,8 @@ export class InteractionController {
     svg.addEventListener('pointerdown', this.onPointerDown);
     window.addEventListener('pointermove', this.onPointerMove);
     window.addEventListener('pointerup', this.onPointerUp);
+    window.addEventListener('pointercancel', this.onPointerCancel);
+    window.addEventListener('blur', this.onWindowBlur);
     svg.addEventListener('wheel', this.onWheel, { passive: false });
     svg.addEventListener('dblclick', this.onDoubleClick);
     window.addEventListener('keydown', this.onKeyDown);
@@ -190,15 +224,22 @@ export class InteractionController {
     for (const l of this.selectionListeners) l(sel);
   }
 
-  private findNodeAt(world: Point): DiagramNode | null {
+  private isSvgVisible(): boolean {
+    const svg = this.renderer.svg;
+    if (!svg.isConnected) return false;
+    const rect = svg.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+  }
+
+  private findNodeAt(world: Point, margin = 0): DiagramNode | null {
     const nodes = this.engine.getDocument().nodes;
     for (let i = nodes.length - 1; i >= 0; i--) {
       const n = nodes[i];
       if (
-        world.x >= n.geometry.x &&
-        world.x <= n.geometry.x + n.geometry.width &&
-        world.y >= n.geometry.y &&
-        world.y <= n.geometry.y + n.geometry.height
+        world.x >= n.geometry.x - margin &&
+        world.x <= n.geometry.x + n.geometry.width + margin &&
+        world.y >= n.geometry.y - margin &&
+        world.y <= n.geometry.y + n.geometry.height + margin
       ) {
         return n;
       }
@@ -211,15 +252,78 @@ export class InteractionController {
     return Math.round(val / this.gridSize) * this.gridSize;
   }
 
+  private computeBendInsertIndex(edge: DiagramEdge, src: DiagramNode, tgt: DiagramNode, world: Point): number {
+    // Compare against the logical chain [srcCenter, ...edge.bends, tgtCenter]
+    // so orthogonal synthetic corners don't skew the insertion index.
+    const chain: Point[] = [
+      { x: src.geometry.x + src.geometry.width / 2, y: src.geometry.y + src.geometry.height / 2 },
+      ...edge.bends,
+      { x: tgt.geometry.x + tgt.geometry.width / 2, y: tgt.geometry.y + tgt.geometry.height / 2 },
+    ];
+    let bestSeg = 0;
+    let bestDist = Infinity;
+    for (let i = 0; i < chain.length - 1; i++) {
+      const d = distToSegment(world, chain[i], chain[i + 1]);
+      if (d < bestDist) {
+        bestDist = d;
+        bestSeg = i;
+      }
+    }
+    return Math.min(bestSeg, edge.bends.length);
+  }
+
+  private abortDrag(): void {
+    const session = this.drag;
+    if (!session) return;
+    this.drag = null;
+    this.snapLines = [];
+    this.draftEdge = null;
+
+    if (session.kind === 'move-nodes') {
+      for (const [id, orig] of session.origins.entries()) {
+        const n = this.engine.getNode(id);
+        if (n) {
+          n.geometry.x = orig.x;
+          n.geometry.y = orig.y;
+        }
+      }
+      this.redraw();
+    } else if (session.kind === 'resize-node') {
+      const n = this.engine.getNode(session.nodeId);
+      if (n) {
+        n.geometry = { ...n.geometry, ...session.orig };
+      }
+      this.redraw();
+    } else if (session.kind === 'move-bend') {
+      const edge = this.engine.getEdge(session.edgeId);
+      if (edge) {
+        edge.bends = session.origBends;
+        edge.routing = session.origRouting;
+      }
+      this.redraw();
+    } else if (session.kind === 'create-edge') {
+      this.redraw();
+    }
+  }
+
+  private onPointerCancel = (): void => {
+    this.abortDrag();
+  };
+
+  private onWindowBlur = (): void => {
+    this.abortDrag();
+  };
+
   private onPointerDown = (e: PointerEvent): void => {
     if (e.button !== 0 && e.button !== 1) return;
     this.closeInlineEditor(true);
+    this.renderer.svg.focus({ preventScroll: true });
 
-    const target = e.target as SVGElement | null;
+    const target = e.target as Element | null;
     const doc = this.engine.getDocument();
     const world = this.renderer.screenToWorld(e.clientX, e.clientY, doc);
 
-    // Middle mouse or readonly background => pan
+    // Middle mouse => pan
     if (e.button === 1) {
       this.drag = {
         kind: 'pan',
@@ -232,8 +336,9 @@ export class InteractionController {
     }
 
     // 1. Resize handle
-    const resizeNodeId = target?.getAttribute('data-resize-node-id');
-    const resizeDir = target?.getAttribute('data-resize-dir');
+    const resizeEl = target?.closest('[data-resize-node-id]') as Element | null;
+    const resizeNodeId = resizeEl?.getAttribute('data-resize-node-id');
+    const resizeDir = resizeEl?.getAttribute('data-resize-dir');
     if (this.mode === 'editor' && resizeNodeId && resizeDir) {
       const node = this.engine.getNode(resizeNodeId);
       if (node) {
@@ -248,13 +353,15 @@ export class InteractionController {
             width: node.geometry.width,
             height: node.geometry.height,
           },
+          moved: false,
         };
       }
       return;
     }
 
-    // 2. Port handle => start edge creation
-    const portNodeId = target?.getAttribute('data-port-node-id');
+    // 2. Port handle => start edge creation (checked BEFORE node hit!)
+    const portEl = target?.closest('[data-port-node-id]') as Element | null;
+    const portNodeId = portEl?.getAttribute('data-port-node-id');
     if (this.mode === 'editor' && portNodeId) {
       this.drag = { kind: 'create-edge', fromNodeId: portNodeId };
       this.draftEdge = { fromNodeId: portNodeId, toPoint: world, targetNodeId: null };
@@ -263,9 +370,10 @@ export class InteractionController {
     }
 
     // 3. Bend handle => move existing bend
-    const bendEdgeId = target?.getAttribute('data-bend-edge-id');
-    const bendIdxAttr = target?.getAttribute('data-bend-index');
-    if (this.mode === 'editor' && bendEdgeId && bendIdxAttr !== null) {
+    const bendEl = target?.closest('[data-bend-edge-id]') as Element | null;
+    const bendEdgeId = bendEl?.getAttribute('data-bend-edge-id');
+    const bendIdxAttr = bendEl?.getAttribute('data-bend-index');
+    if (this.mode === 'editor' && bendEdgeId && bendIdxAttr !== null && bendIdxAttr !== undefined) {
       const edge = this.engine.getEdge(bendEdgeId);
       if (edge) {
         this.drag = {
@@ -273,19 +381,33 @@ export class InteractionController {
           edgeId: edge.id,
           bendIndex: Number(bendIdxAttr),
           origBends: structuredClone(edge.bends),
+          origRouting: edge.routing,
+          isNewBend: false,
+          moved: false,
         };
       }
       return;
     }
 
     // 4. Node hit
-    const nodeGroup = target?.closest('[data-node-id]') as SVGElement | null;
+    const nodeGroup = target?.closest('[data-node-id]') as Element | null;
     const nodeId = nodeGroup?.getAttribute('data-node-id');
     if (nodeId) {
       if (this.mode === 'editor' && this.tool === 'edge') {
         this.drag = { kind: 'create-edge', fromNodeId: nodeId };
         this.draftEdge = { fromNodeId: nodeId, toPoint: world, targetNodeId: null };
         this.redraw();
+        return;
+      }
+
+      if (this.mode === 'readonly' && !this.readonlySelectable) {
+        this.drag = {
+          kind: 'pan',
+          startX: e.clientX,
+          startY: e.clientY,
+          origVpX: doc.viewport.x,
+          origVpY: doc.viewport.y,
+        };
         return;
       }
 
@@ -310,13 +432,28 @@ export class InteractionController {
       return;
     }
 
-    // 5. Edge hit (select OR yEd-style click-drag to insert bend!)
-    const edgeHitId = target?.getAttribute('data-edge-hit-id');
+    // 5. Edge hit (select OR yEd-style drag >4px to insert bend)
+    const edgeHitEl = target?.closest('[data-edge-hit-id]') as Element | null;
+    const edgeHitId = edgeHitEl?.getAttribute('data-edge-hit-id');
     if (edgeHitId) {
+      if (this.mode === 'readonly' && !this.readonlySelectable) {
+        this.drag = {
+          kind: 'pan',
+          startX: e.clientX,
+          startY: e.clientY,
+          origVpX: doc.viewport.x,
+          origVpY: doc.viewport.y,
+        };
+        return;
+      }
+
       const wasSelected = this.selectedEdgeIds.has(edgeHitId);
-      this.selectedNodeIds.clear();
-      this.selectedEdgeIds = new Set([edgeHitId]);
-      this.emitSelection();
+      if (!wasSelected) {
+        this.selectedNodeIds.clear();
+        this.selectedEdgeIds = new Set([edgeHitId]);
+        this.emitSelection();
+        this.redraw();
+      }
 
       if (this.mode === 'editor' && wasSelected) {
         const edge = this.engine.getEdge(edgeHitId);
@@ -324,41 +461,19 @@ export class InteractionController {
           const src = this.engine.getNode(edge.source.nodeId);
           const tgt = this.engine.getNode(edge.target.nodeId);
           if (src && tgt) {
-            const routed = this.routers.get(edge.routing).route(src, tgt, edge, this.shapes);
-            // Find closest segment index to insert bend
-            let bestSeg = 0;
-            let bestDist = Infinity;
-            for (let i = 0; i < routed.points.length - 1; i++) {
-              const d = distToSegment(world, routed.points[i], routed.points[i + 1]);
-              if (d < bestDist) {
-                bestDist = d;
-                bestSeg = i;
-              }
-            }
-            const nextBends = [...edge.bends];
-            const insertIdx = Math.min(bestSeg, nextBends.length);
-            nextBends.splice(insertIdx, 0, {
-              x: this.snap(world.x, e.ctrlKey || e.metaKey),
-              y: this.snap(world.y, e.ctrlKey || e.metaKey),
-            });
-            this.engine.execute({
-              type: 'edge.update',
-              id: edge.id,
-              patch: {
-                routing: edge.routing === 'straight' ? 'polyline' : edge.routing,
-                bends: nextBends,
-              },
-            });
+            const insertIndex = this.computeBendInsertIndex(edge, src, tgt, world);
             this.drag = {
-              kind: 'move-bend',
+              kind: 'pending-bend',
               edgeId: edge.id,
-              bendIndex: insertIdx,
-              origBends: structuredClone(nextBends),
+              startClientX: e.clientX,
+              startClientY: e.clientY,
+              insertIndex,
+              origBends: structuredClone(edge.bends),
+              origRouting: edge.routing,
             };
           }
         }
       }
-      this.redraw();
       return;
     }
 
@@ -378,8 +493,12 @@ export class InteractionController {
     const world = this.renderer.screenToWorld(e.clientX, e.clientY, doc);
 
     if (!this.drag) {
-      if (this.mode === 'editor') {
-        const hovered = this.findNodeAt(world)?.id ?? null;
+      if (this.mode === 'editor' && this.isSvgVisible()) {
+        const target = e.target as Element | null;
+        const portNodeId = target?.closest?.('[data-port-node-id]')?.getAttribute('data-port-node-id');
+        // Include port-radius margin so hovering onto a port circle never clears hoveredNodeId
+        const hoverMargin = 9 / Math.max(0.15, doc.viewport.zoom);
+        const hovered = portNodeId ?? this.findNodeAt(world, hoverMargin)?.id ?? null;
         if (hovered !== this.hoveredNodeId) {
           this.hoveredNodeId = hovered;
           this.redraw();
@@ -409,6 +528,7 @@ export class InteractionController {
       case 'move-nodes': {
         const dx = world.x - this.drag.startWorld.x;
         const dy = world.y - this.drag.startWorld.y;
+        if (!this.drag.moved && Math.hypot(dx, dy) < 1) break;
         this.drag.moved = true;
         this.snapLines = [];
 
@@ -441,8 +561,7 @@ export class InteractionController {
           }
         }
 
-        // Update positions live directly on current doc without spamming undo stack;
-        // commit on pointerup.
+        // Update positions live directly for 60fps preview; commit atomically on pointerup.
         for (const [id, orig] of this.drag.origins.entries()) {
           const node = this.engine.getNode(id);
           if (!node) continue;
@@ -484,6 +603,9 @@ export class InteractionController {
           }
         }
 
+        if (x !== o.x || y !== o.y || width !== o.width || height !== o.height) {
+          this.drag.moved = true;
+        }
         node.geometry.x = x;
         node.geometry.y = y;
         node.geometry.width = width;
@@ -500,14 +622,49 @@ export class InteractionController {
         break;
       }
 
-      case 'move-bend': {
+      case 'pending-bend': {
+        // Require > 4px drag threshold before inserting a new bend point
+        const dist = Math.hypot(e.clientX - this.drag.startClientX, e.clientY - this.drag.startClientY);
+        if (dist < 4) break;
         const edge = this.engine.getEdge(this.drag.edgeId);
-        if (!edge || !edge.bends[this.drag.bendIndex]) return;
-        edge.bends[this.drag.bendIndex] = {
+        if (!edge) break;
+
+        const pt: Point = {
           x: this.snap(world.x, bypassSnap),
           y: this.snap(world.y, bypassSnap),
         };
+        const nextBends = [...this.drag.origBends];
+        nextBends.splice(this.drag.insertIndex, 0, pt);
+        edge.bends = nextBends;
+        if (edge.routing === 'straight') {
+          edge.routing = 'polyline';
+        }
+        this.drag = {
+          kind: 'move-bend',
+          edgeId: edge.id,
+          bendIndex: this.drag.insertIndex,
+          origBends: this.drag.origBends,
+          origRouting: this.drag.origRouting,
+          isNewBend: true,
+          moved: true,
+        };
         this.redraw();
+        break;
+      }
+
+      case 'move-bend': {
+        const edge = this.engine.getEdge(this.drag.edgeId);
+        if (!edge || !edge.bends[this.drag.bendIndex]) return;
+        const nextPt = {
+          x: this.snap(world.x, bypassSnap),
+          y: this.snap(world.y, bypassSnap),
+        };
+        const cur = edge.bends[this.drag.bendIndex];
+        if (cur.x !== nextPt.x || cur.y !== nextPt.y) {
+          this.drag.moved = true;
+          edge.bends[this.drag.bendIndex] = nextPt;
+          this.redraw();
+        }
         break;
       }
     }
@@ -521,17 +678,19 @@ export class InteractionController {
 
     switch (session.kind) {
       case 'move-nodes': {
-        if (session.moved) {
-          // Capture final positions, restore origins, then dispatch 1 undoable batch command
-          const finals = new Map<string, Point>();
-          for (const [id, orig] of session.origins.entries()) {
-            const n = this.engine.getNode(id);
-            if (n) {
-              finals.set(id, { x: n.geometry.x, y: n.geometry.y });
-              n.geometry.x = orig.x;
-              n.geometry.y = orig.y;
-            }
+        if (!session.moved) break;
+        const finals = new Map<string, Point>();
+        let anyChanged = false;
+        for (const [id, orig] of session.origins.entries()) {
+          const n = this.engine.getNode(id);
+          if (n) {
+            if (n.geometry.x !== orig.x || n.geometry.y !== orig.y) anyChanged = true;
+            finals.set(id, { x: n.geometry.x, y: n.geometry.y });
+            n.geometry.x = orig.x;
+            n.geometry.y = orig.y;
           }
+        }
+        if (anyChanged) {
           const commands: DiagramCommand[] = [];
           for (const [id, pt] of finals.entries()) {
             commands.push({ type: 'node.update', id, patch: { geometry: { x: pt.x, y: pt.y } } });
@@ -542,15 +701,23 @@ export class InteractionController {
       }
 
       case 'resize-node': {
+        if (!session.moved) break;
         const n = this.engine.getNode(session.nodeId);
         if (n) {
           const finalGeo = { ...n.geometry };
           n.geometry = { ...n.geometry, ...session.orig };
-          this.engine.execute({
-            type: 'node.update',
-            id: session.nodeId,
-            patch: { geometry: finalGeo },
-          });
+          if (
+            finalGeo.x !== session.orig.x ||
+            finalGeo.y !== session.orig.y ||
+            finalGeo.width !== session.orig.width ||
+            finalGeo.height !== session.orig.height
+          ) {
+            this.engine.execute({
+              type: 'node.update',
+              id: session.nodeId,
+              patch: { geometry: finalGeo },
+            });
+          }
         }
         break;
       }
@@ -568,16 +735,29 @@ export class InteractionController {
         break;
       }
 
+      case 'pending-bend': {
+        // Click without dragging (>4px): do nothing so double-click label editing works cleanly
+        break;
+      }
+
       case 'move-bend': {
+        if (!session.moved && !session.isNewBend) break;
         const edge = this.engine.getEdge(session.edgeId);
         if (edge) {
           const finalBends = structuredClone(edge.bends);
+          const finalRouting = edge.routing;
           edge.bends = session.origBends;
-          this.engine.execute({
-            type: 'edge.update',
-            id: session.edgeId,
-            patch: { bends: finalBends },
-          });
+          edge.routing = session.origRouting;
+          if (!pointsEqual(finalBends, session.origBends) || finalRouting !== session.origRouting) {
+            this.engine.execute({
+              type: 'edge.update',
+              id: session.edgeId,
+              patch: {
+                routing: finalRouting,
+                bends: finalBends,
+              },
+            });
+          }
         }
         break;
       }
@@ -586,12 +766,15 @@ export class InteractionController {
 
   private onWheel = (e: WheelEvent): void => {
     e.preventDefault();
+    this.closeInlineEditor(true);
     const doc = this.engine.getDocument();
     const rect = this.renderer.svg.getBoundingClientRect();
     const mouseX = e.clientX - rect.left;
     const mouseY = e.clientY - rect.top;
 
-    const zoomFactor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
+    // Smooth exponential zoom for both mouse wheels and macOS trackpads
+    const clampedDelta = Math.max(-120, Math.min(120, e.deltaY));
+    const zoomFactor = Math.exp(-clampedDelta * 0.0022);
     const nextZoom = Math.max(0.15, Math.min(4, doc.viewport.zoom * zoomFactor));
     const scaleRatio = nextZoom / doc.viewport.zoom;
 
@@ -607,47 +790,140 @@ export class InteractionController {
 
   private onDoubleClick = (e: MouseEvent): void => {
     if (this.mode !== 'editor') return;
-    const target = e.target as SVGElement | null;
+    const target = e.target as Element | null;
 
-    // Double-click bend handle => remove bend (yEd behavior!)
-    const bendEdgeId = target?.getAttribute('data-bend-edge-id');
-    const bendIdxAttr = target?.getAttribute('data-bend-index');
-    if (bendEdgeId && bendIdxAttr !== null) {
+    // 1. Double-click bend handle => remove bend (yEd behavior!)
+    const bendEl = target?.closest('[data-bend-edge-id]') as Element | null;
+    const bendEdgeId = bendEl?.getAttribute('data-bend-edge-id');
+    const bendIdxAttr = bendEl?.getAttribute('data-bend-index');
+    if (bendEdgeId && bendIdxAttr !== null && bendIdxAttr !== undefined) {
       const edge = this.engine.getEdge(bendEdgeId);
       if (edge) {
-        const nextBends = edge.bends.filter((_, i) => i !== Number(bendIdxAttr));
+        const idx = Number(bendIdxAttr);
+        const nextBends = edge.bends.filter((_, i) => i !== idx);
         this.engine.execute({ type: 'edge.update', id: edge.id, patch: { bends: nextBends } });
       }
       return;
     }
 
-    // Double-click node => edit label
-    const nodeGroup = target?.closest('[data-node-id]') as SVGElement | null;
+    // Proximity fallback for bend handle double-click on selected edges
+    const doc = this.engine.getDocument();
+    const world = this.renderer.screenToWorld(e.clientX, e.clientY, doc);
+    const bendHitRadius = 10 / Math.max(0.15, doc.viewport.zoom);
+    for (const selEdgeId of this.selectedEdgeIds) {
+      const edge = this.engine.getEdge(selEdgeId);
+      if (!edge) continue;
+      const idx = edge.bends.findIndex((b) => Math.hypot(b.x - world.x, b.y - world.y) <= bendHitRadius);
+      if (idx >= 0) {
+        const nextBends = edge.bends.filter((_, i) => i !== idx);
+        this.engine.execute({ type: 'edge.update', id: edge.id, patch: { bends: nextBends } });
+        return;
+      }
+    }
+
+    // 2. Double-click node => edit label
+    const nodeGroup = target?.closest('[data-node-id]') as Element | null;
     const nodeId = nodeGroup?.getAttribute('data-node-id');
     if (nodeId) {
       this.openInlineLabelEditor('node', nodeId);
       return;
     }
 
-    // Double-click edge => edit edge label
-    const edgeHitId = target?.getAttribute('data-edge-hit-id');
+    // 3. Double-click edge => edit edge label
+    const edgeHitEl = target?.closest('[data-edge-hit-id]') as Element | null;
+    const edgeHitId = edgeHitEl?.getAttribute('data-edge-hit-id');
     if (edgeHitId) {
       this.openInlineLabelEditor('edge', edgeHitId);
     }
   };
 
   private onKeyDown = (e: KeyboardEvent): void => {
-    if (this.mode !== 'editor') return;
+    if (this.mode !== 'editor' || !this.isSvgVisible()) return;
     const active = document.activeElement;
-    if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.tagName === 'SELECT')) {
+    if (
+      active &&
+      (active.tagName === 'INPUT' ||
+        active.tagName === 'TEXTAREA' ||
+        active.tagName === 'SELECT' ||
+        (active as HTMLElement).isContentEditable)
+    ) {
+      return;
+    }
+    // If another Diagrav canvas is explicitly focused, don't hijack its shortcuts
+    if (active && active.classList.contains('diagrav-svg') && active !== this.renderer.svg) {
       return;
     }
 
-    // Undo / Redo
-    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') {
+    const mod = e.metaKey || e.ctrlKey;
+    const key = e.key.toLowerCase();
+
+    // Undo / Redo (Cmd+Z / Cmd+Shift+Z / Ctrl+Y)
+    if (mod && key === 'z') {
       e.preventDefault();
       if (e.shiftKey) this.engine.redo();
       else this.engine.undo();
+      return;
+    }
+    if (mod && key === 'y') {
+      e.preventDefault();
+      this.engine.redo();
+      return;
+    }
+
+    // Select All (Cmd+A)
+    if (mod && key === 'a') {
+      e.preventDefault();
+      const doc = this.engine.getDocument();
+      this.selectNodes(doc.nodes.map((n) => n.id));
+      return;
+    }
+
+    // Duplicate selected nodes (Cmd+D)
+    if (mod && key === 'd' && this.selectedNodeIds.size > 0) {
+      e.preventDefault();
+      const commands: DiagramCommand[] = [];
+      const newIds: string[] = [];
+      for (const id of this.selectedNodeIds) {
+        const orig = this.engine.getNode(id);
+        if (!orig) continue;
+        const copy = structuredClone(orig);
+        copy.id = generateId('node');
+        copy.geometry.x += 24;
+        copy.geometry.y += 24;
+        copy.labels = copy.labels.map((l) => ({ ...l, id: generateId('lbl') }));
+        commands.push({ type: 'node.create', node: copy });
+        newIds.push(copy.id);
+      }
+      if (commands.length > 0) {
+        this.engine.execute({ type: 'batch', commands, label: 'Duplicate nodes' });
+        this.selectNodes(newIds);
+      }
+      return;
+    }
+
+    // Arrow key nudge for selected nodes
+    if (
+      this.selectedNodeIds.size > 0 &&
+      (e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'ArrowLeft' || e.key === 'ArrowRight')
+    ) {
+      e.preventDefault();
+      const step = e.shiftKey ? 1 : this.gridSize;
+      const dx = e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0;
+      const dy = e.key === 'ArrowUp' ? -step : e.key === 'ArrowDown' ? step : 0;
+      const commands: DiagramCommand[] = [];
+      for (const id of this.selectedNodeIds) {
+        const n = this.engine.getNode(id);
+        if (n) {
+          commands.push({
+            type: 'node.update',
+            id,
+            patch: { geometry: { x: n.geometry.x + dx, y: n.geometry.y + dy } },
+          });
+        }
+      }
+      if (commands.length > 0) {
+        this.engine.execute({ type: 'batch', commands, label: 'Nudge nodes' });
+      }
       return;
     }
 
@@ -662,8 +938,9 @@ export class InteractionController {
       return;
     }
 
-    // Escape => clear selection
+    // Escape => cancel draft / clear selection
     if (e.key === 'Escape') {
+      this.abortDrag();
       this.draftEdge = null;
       this.clearSelection();
       return;
@@ -682,6 +959,7 @@ export class InteractionController {
   };
 
   openInlineLabelEditor(kind: 'node' | 'edge', id: string): void {
+    if (this.mode !== 'editor') return;
     this.closeInlineEditor(true);
     const doc = this.engine.getDocument();
     let worldPos: Point;
@@ -690,11 +968,17 @@ export class InteractionController {
     if (kind === 'node') {
       const node = this.engine.getNode(id);
       if (!node) return;
-      worldPos = {
-        x: node.geometry.x + node.geometry.width / 2,
-        y: node.geometry.y + node.geometry.height / 2,
-      };
-      initialText = node.labels[0]?.text ?? '';
+      const existing = node.labels[0];
+      if (existing) {
+        const pos = computeNodeLabelPosition(node, existing);
+        worldPos = { x: pos.x, y: pos.y };
+        initialText = existing.text;
+      } else {
+        worldPos = {
+          x: node.geometry.x + node.geometry.width / 2,
+          y: node.geometry.y + node.geometry.height / 2,
+        };
+      }
     } else {
       const edge = this.engine.getEdge(id);
       if (!edge) return;
@@ -702,9 +986,14 @@ export class InteractionController {
       const tgt = this.engine.getNode(edge.target.nodeId);
       if (!src || !tgt) return;
       const routed = this.routers.get(edge.routing).route(src, tgt, edge, this.shapes);
-      const mid = routed.points[Math.floor(routed.points.length / 2)] ?? routed.points[0];
-      worldPos = mid;
-      initialText = edge.labels[0]?.text ?? '';
+      const existing = edge.labels[0];
+      if (existing) {
+        const pos = computeEdgeLabelPosition(routed.points, existing);
+        worldPos = { x: pos.x, y: pos.y };
+        initialText = existing.text;
+      } else {
+        worldPos = pointAlongPolyline(routed.points, 0.5).point;
+      }
     }
 
     const screen = this.renderer.worldToScreen(worldPos, doc);
@@ -712,23 +1001,24 @@ export class InteractionController {
     input.type = 'text';
     input.value = initialText;
     input.style.position = 'fixed';
-    input.style.left = `${screen.x - 70}px`;
-    input.style.top = `${screen.y - 14}px`;
-    input.style.width = '140px';
-    input.style.height = '28px';
+    input.style.left = `${screen.x - 80}px`;
+    input.style.top = `${screen.y - 15}px`;
+    input.style.width = '160px';
+    input.style.height = '30px';
     input.style.padding = '2px 8px';
     input.style.fontSize = '13px';
     input.style.textAlign = 'center';
-    input.style.border = '2px solid #2563eb';
+    input.style.border = '2px solid var(--j-accent, #2563eb)';
     input.style.borderRadius = '6px';
-    input.style.background = '#ffffff';
-    input.style.color = '#0f172a';
+    input.style.background = 'var(--j-surface-1, #ffffff)';
+    input.style.color = 'var(--j-fg, #0f172a)';
     input.style.outline = 'none';
     input.style.zIndex = '9999';
-    input.style.boxShadow = '0 4px 12px rgba(15, 23, 42, 0.15)';
+    input.style.boxShadow = '0 4px 12px rgba(15, 23, 42, 0.18)';
 
     const commit = () => {
       const text = input.value;
+      if (text === initialText) return;
       if (kind === 'node') {
         const node = this.engine.getNode(id);
         if (node) {

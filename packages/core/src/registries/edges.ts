@@ -32,6 +32,18 @@ function computeClippedEndpoints(
   innerPoints: Point[],
   shapes: ShapeRegistry,
 ): Point[] {
+  // Handle self-loops with an explicit loop around the top-right corner when no bends are specified
+  if (source.id === target.id && innerPoints.length === 0) {
+    const { x, y, width: w } = source.geometry;
+    const loopInner: Point[] = [
+      { x: x + w + 28, y: y - 24 },
+      { x: x + w / 2, y: y - 34 },
+    ];
+    const start = shapes.get(source.type).getAnchorPoint(source, loopInner[0]);
+    const end = shapes.get(target.type).getAnchorPoint(target, loopInner[1]);
+    return [start, ...loopInner, end];
+  }
+
   const srcCenter = centerOf(source);
   const tgtCenter = centerOf(target);
   const firstRef = innerPoints.length > 0 ? innerPoints[0] : tgtCenter;
