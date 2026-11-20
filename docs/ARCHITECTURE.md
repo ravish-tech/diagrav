@@ -27,9 +27,10 @@
 
 ## 3. UI Framework — Jenni UI
 
-- `@diagrav/ui` is built with **Jenni UI** (`jenni-core` + `jenni-react`, React 19): https://github.com/ravish-tech/Jenni
-- **Potential Jenni UI Enhancements** (to request from the Jenni maintainer as Diagrav matures):
-  1. `Toolbar` / `MenuBar` with roving keyboard focus (File/Edit/View menus).
+- `@diagrav/ui` is built with **Jenni UI v0.2.0** (`jenni-core` + `jenni-react`, React 19): https://github.com/ravish-tech/Jenni
+- Uses Jenni v0.2.0 primitives (`TopBar`, `StatusBar`, `StatusBarItem`, `DropdownMenu`, `Dialog`, `Accordion`, `ColorPicker`, `NumberInput`, `Select`, `SegmentedControl`, `Switch`, `Tooltip`, `Kbd`, `Toaster`).
+- **Remaining Jenni UI Enhancements** (to request from the Jenni maintainer as Diagrav matures):
+  1. `DockWorkspace` / `FloatingPanel` (drag-to-float, snap-to-left/right dock panels).
   2. `GradientPicker` (linear/radial stops + angle, extending `ColorPicker`).
   3. Compact `PropertyRow` / `InspectorSection` primitives for dense 2-column property panels.
   4. `SplitButton` (primary action + format dropdown).

@@ -11,7 +11,7 @@ import {
   type SelectionState,
   type ShapeDefinition,
 } from '@diagrav/core';
-import { Toaster, toast } from 'jenni-react';
+import { StatusBar, StatusBarItem, Toaster, toast } from 'jenni-react';
 import { useEffect, useRef, useState } from 'react';
 import { DockWorkspace, type DockPanelConfig, type PanelState } from './components/DockWorkspace';
 import { EmbedDemo } from './components/EmbedDemo';
@@ -424,32 +424,50 @@ export function App() {
       </DockWorkspace>
 
       {!isEmbed && (
-        <div className="diagrav-statusbar-wrap">
-          <div className="diagrav-statusbar">
-            <span>
-              Mode: <strong>{viewMode}</strong> · Tool: <strong>{tool}</strong>
-            </span>
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 12 }}>
-              <button
-                type="button"
-                className={`diagrav-bridge-pill is-${aiBridge.status}`}
+        <StatusBar
+          variant="subtle"
+          border="top"
+          start={
+            <>
+              <StatusBarItem>
+                Mode: <strong>{viewMode}</strong>
+              </StatusBarItem>
+              <StatusBarItem>
+                Tool: <strong>{tool}</strong>
+              </StatusBarItem>
+            </>
+          }
+          end={
+            <>
+              <StatusBarItem
+                as="button"
+                interactive
+                dot
+                tone={
+                  aiBridge.status === 'connected'
+                    ? 'success'
+                    : aiBridge.status === 'connecting'
+                      ? 'warning'
+                      : 'neutral'
+                }
                 onClick={aiBridge.toggle}
                 title="Connect to local @diagrav/mcp WebSocket bridge (ws://127.0.0.1:4175)"
               >
-                <span className="diagrav-bridge-dot" aria-hidden="true" />
                 {aiBridge.status === 'connected'
                   ? 'AI Bridge: Live'
                   : aiBridge.status === 'connecting'
                     ? 'AI Bridge: Connecting…'
                     : 'AI Bridge: Off'}
-              </button>
-              <span>
-                Zoom: <strong>{Math.round(doc.viewport.zoom * 100)}%</strong> · Nodes:{' '}
-                {doc.nodes.length} · Edges: {doc.edges.length}
-              </span>
-            </span>
-          </div>
-        </div>
+              </StatusBarItem>
+              <StatusBarItem>
+                Zoom: <strong>{Math.round(doc.viewport.zoom * 100)}%</strong>
+              </StatusBarItem>
+              <StatusBarItem>
+                Nodes: {doc.nodes.length} · Edges: {doc.edges.length}
+              </StatusBarItem>
+            </>
+          }
+        />
       )}
 
       <JsonViewerModal

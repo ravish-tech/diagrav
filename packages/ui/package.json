@@ -11,8 +11,8 @@
   },
   "dependencies": {
     "@diagrav/core": "*",
-    "jenni-core": "^0.1.0",
-    "jenni-react": "^0.1.0",
+    "jenni-core": "https://github.com/ravish-tech/Jenni/releases/download/v0.2.0/jenni-core-0.2.0.tgz",
+    "jenni-react": "https://github.com/ravish-tech/Jenni/releases/download/v0.2.0/jenni-react-0.2.0.tgz",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },
