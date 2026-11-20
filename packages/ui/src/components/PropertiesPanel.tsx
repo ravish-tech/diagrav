@@ -10,8 +10,11 @@ import {
   type EdgePatch,
   type EdgeRouting,
   type FillStyle,
+  type NodeAlignment,
+  type NodeDistribution,
   type NodeLabelPlacement,
   type NodeLabelPosition,
+  type NodeMatchSize,
   type NodePatch,
   type SelectionState,
   type ShapeDefinition,
@@ -27,6 +30,7 @@ import {
   Separator,
   Stack,
   Switch,
+  Tooltip,
 } from 'jenni-react';
 import { useEffect, useRef, useState } from 'react';
 
@@ -39,6 +43,9 @@ export interface PropertiesPanelProps {
   readOnly: boolean;
   onUpdateNode: (id: string, patch: NodePatch, mergeKey?: string) => void;
   onUpdateEdge: (id: string, patch: EdgePatch, mergeKey?: string) => void;
+  onAlignNodes: (alignment: NodeAlignment) => void;
+  onDistributeNodes: (mode: NodeDistribution) => void;
+  onMatchSizeNodes: (mode: NodeMatchSize) => void;
   onDeleteSelection: () => void;
 }
 
@@ -182,21 +189,130 @@ export function PropertiesPanel({
   readOnly,
   onUpdateNode,
   onUpdateEdge,
+  onAlignNodes,
+  onDistributeNodes,
+  onMatchSizeNodes,
   onDeleteSelection,
 }: PropertiesPanelProps) {
   const multiCount = selection.nodeIds.length + selection.edgeIds.length;
+  const multiNodes = selection.nodeIds.length;
 
-  // Multi-selection view
+  // Multi-selection view (yEd-style Align, Distribute/Space Equally, Match Size)
   if (multiCount > 1) {
     return (
       <div className="diagrav-panel diagrav-sidebar-panel">
         <Stack gap="item">
           <div className="diagrav-section-title">Selection</div>
           <div style={{ fontSize: 13, color: 'var(--j-fg-muted, #64748b)' }}>
-            <strong>{multiCount} elements selected</strong>
+            <strong style={{ color: 'var(--j-fg, #0f172a)' }}>{multiCount} elements selected</strong>
             <br />
-            {selection.nodeIds.length} nodes · {selection.edgeIds.length} edges
+            {multiNodes} nodes · {selection.edgeIds.length} edges
           </div>
+
+          {!readOnly && multiNodes >= 2 && (
+            <>
+              <Separator />
+              <div className="diagrav-section-title">Align</div>
+              <div className="diagrav-align-grid-3">
+                <Tooltip content="Align Left Edges">
+                  <Button size="sm" variant="outline" onClick={() => onAlignNodes('left')}>
+                    Left
+                  </Button>
+                </Tooltip>
+                <Tooltip content="Align Horizontal Centers">
+                  <Button size="sm" variant="outline" onClick={() => onAlignNodes('center-x')}>
+                    Center
+                  </Button>
+                </Tooltip>
+                <Tooltip content="Align Right Edges">
+                  <Button size="sm" variant="outline" onClick={() => onAlignNodes('right')}>
+                    Right
+                  </Button>
+                </Tooltip>
+                <Tooltip content="Align Top Edges">
+                  <Button size="sm" variant="outline" onClick={() => onAlignNodes('top')}>
+                    Top
+                  </Button>
+                </Tooltip>
+                <Tooltip content="Align Vertical Middles">
+                  <Button size="sm" variant="outline" onClick={() => onAlignNodes('middle-y')}>
+                    Middle
+                  </Button>
+                </Tooltip>
+                <Tooltip content="Align Bottom Edges">
+                  <Button size="sm" variant="outline" onClick={() => onAlignNodes('bottom')}>
+                    Bottom
+                  </Button>
+                </Tooltip>
+              </div>
+
+              <Separator />
+              <div className="diagrav-section-title">Distribute &amp; Space</div>
+              <div className="diagrav-align-grid-2">
+                <Tooltip content="Equal horizontal gaps (3+ nodes)">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={multiNodes < 3}
+                    onClick={() => onDistributeNodes('horizontal-gaps')}
+                  >
+                    Space H
+                  </Button>
+                </Tooltip>
+                <Tooltip content="Equal vertical gaps (3+ nodes)">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={multiNodes < 3}
+                    onClick={() => onDistributeNodes('vertical-gaps')}
+                  >
+                    Space V
+                  </Button>
+                </Tooltip>
+                <Tooltip content="Distribute horizontal centers (3+ nodes)">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={multiNodes < 3}
+                    onClick={() => onDistributeNodes('horizontal-centers')}
+                  >
+                    Centers H
+                  </Button>
+                </Tooltip>
+                <Tooltip content="Distribute vertical centers (3+ nodes)">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={multiNodes < 3}
+                    onClick={() => onDistributeNodes('vertical-centers')}
+                  >
+                    Centers V
+                  </Button>
+                </Tooltip>
+              </div>
+
+              <Separator />
+              <div className="diagrav-section-title">Match Size</div>
+              <div className="diagrav-align-grid-3">
+                <Tooltip content="Match width to first selected node">
+                  <Button size="sm" variant="outline" onClick={() => onMatchSizeNodes('width')}>
+                    Width
+                  </Button>
+                </Tooltip>
+                <Tooltip content="Match height to first selected node">
+                  <Button size="sm" variant="outline" onClick={() => onMatchSizeNodes('height')}>
+                    Height
+                  </Button>
+                </Tooltip>
+                <Tooltip content="Match width & height">
+                  <Button size="sm" variant="outline" onClick={() => onMatchSizeNodes('both')}>
+                    Both
+                  </Button>
+                </Tooltip>
+              </div>
+            </>
+          )}
+
           {!readOnly && (
             <>
               <Separator />
@@ -227,6 +343,7 @@ export function PropertiesPanel({
             <div>Drag shapes from Palette or click to insert.</div>
             <div>Hover a node and drag any blue port to connect.</div>
             <div>Drag a selected edge to add bends; double-click a bend to remove.</div>
+            <div>Shift+drag empty canvas to box-select &amp; align/distribute nodes.</div>
           </div>
           <Separator />
           <div className="diagrav-section-title">Shortcuts</div>

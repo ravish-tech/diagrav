@@ -5,6 +5,14 @@ import {
   type HistoryListener,
 } from './commands/engine.js';
 import type { CommandResult, DiagramCommand } from './commands/types.js';
+import {
+  createAlignNodesCommand,
+  createDistributeNodesCommand,
+  createMatchSizeCommand,
+  type NodeAlignment,
+  type NodeDistribution,
+  type NodeMatchSize,
+} from './layout/alignment.js';
 import { EdgeRouterRegistry } from './registries/edges.js';
 import { ShapeRegistry } from './registries/shapes.js';
 import {
@@ -121,6 +129,36 @@ export class Diagrav {
 
   getSelection(): SelectionState {
     return this.interaction.getSelection();
+  }
+
+  alignSelected(alignment: NodeAlignment): boolean {
+    const cmd = createAlignNodesCommand(
+      this.engine.getDocument(),
+      this.interaction.getSelection().nodeIds,
+      alignment,
+    );
+    if (!cmd) return false;
+    return this.engine.execute(cmd).ok;
+  }
+
+  distributeSelected(mode: NodeDistribution): boolean {
+    const cmd = createDistributeNodesCommand(
+      this.engine.getDocument(),
+      this.interaction.getSelection().nodeIds,
+      mode,
+    );
+    if (!cmd) return false;
+    return this.engine.execute(cmd).ok;
+  }
+
+  matchSizeSelected(mode: NodeMatchSize): boolean {
+    const cmd = createMatchSizeCommand(
+      this.engine.getDocument(),
+      this.interaction.getSelection().nodeIds,
+      mode,
+    );
+    if (!cmd) return false;
+    return this.engine.execute(cmd).ok;
   }
 
   screenToWorld(clientX: number, clientY: number): Point {

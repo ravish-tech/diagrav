@@ -29,7 +29,7 @@ export interface ToolbarProps {
   showGrid: boolean;
   onToggleGrid: () => void;
   onFitView: () => void;
-  onExportJson: () => void;
+  onViewJson: () => void;
   onExportSvg: () => void;
   onImportJson: () => void;
   notesOpen: boolean;
@@ -53,7 +53,7 @@ export function Toolbar({
   showGrid,
   onToggleGrid,
   onFitView,
-  onExportJson,
+  onViewJson,
   onExportSvg,
   onImportJson,
   notesOpen,
@@ -167,9 +167,11 @@ export function Toolbar({
                 Open
               </Button>
             )}
-            <Button size="sm" variant="outline" onClick={onExportJson}>
-              JSON
-            </Button>
+            <Tooltip content="Inspect syntax-highlighted .diagrav.json">
+              <Button size="sm" variant="outline" onClick={onViewJson}>
+                View JSON
+              </Button>
+            </Tooltip>
             <Button size="sm" variant="solid" onClick={onExportSvg}>
               Export SVG
             </Button>

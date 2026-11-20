@@ -1,5 +1,6 @@
 import type { CommandEngine } from '../commands/engine.js';
 import type { DiagramCommand } from '../commands/types.js';
+import { computeSmartSnap, type RectBox } from '../layout/alignment.js';
 import { pointAlongPolyline, type EdgeRouterRegistry } from '../registries/edges.js';
 import { computeEdgeLabelPosition, computeNodeLabelPosition } from '../registries/labels.js';
 import type { ShapeRegistry } from '../registries/shapes.js';
@@ -25,6 +26,7 @@ export type SelectionListener = (selection: SelectionState) => void;
 
 type DragSession =
   | { kind: 'pan'; startX: number; startY: number; origVpX: number; origVpY: number }
+  | { kind: 'marquee'; startWorld: Point; additive: boolean }
   | {
       kind: 'move-nodes';
       startWorld: Point;
@@ -91,6 +93,8 @@ export class InteractionController {
   private hoveredNodeId: string | null = null;
   private draftEdge: RenderState['draftEdge'] = null;
   private snapLines: RenderState['snapLines'] = [];
+  private spacingGuides: RenderState['spacingGuides'] = [];
+  private marqueeRect: RectBox | null = null;
   private drag: DragSession | null = null;
   private selectionListeners = new Set<SelectionListener>();
   private activeInlineInput: HTMLInputElement | null = null;
@@ -118,6 +122,8 @@ export class InteractionController {
       gridSize: this.gridSize,
       draftEdge: this.draftEdge,
       snapLines: this.snapLines,
+      spacingGuides: this.spacingGuides,
+      marqueeRect: this.marqueeRect,
     };
   }
 
@@ -131,6 +137,8 @@ export class InteractionController {
       this.abortDrag();
       this.draftEdge = null;
       this.snapLines = [];
+      this.spacingGuides = [];
+      this.marqueeRect = null;
       this.hoveredNodeId = null;
       this.closeInlineEditor(false);
     }
@@ -283,6 +291,8 @@ export class InteractionController {
     if (!session) return;
     this.drag = null;
     this.snapLines = [];
+    this.spacingGuides = [];
+    this.marqueeRect = null;
     this.draftEdge = null;
 
     if (session.kind === 'move-nodes') {
@@ -485,7 +495,13 @@ export class InteractionController {
       return;
     }
 
-    // 6. Empty canvas => clear selection + start pan
+    // 6. Empty canvas => Shift+drag marquee select (editor) OR clear selection + start pan
+    if (this.mode === 'editor' && e.shiftKey) {
+      this.drag = { kind: 'marquee', startWorld: world, additive: true };
+      this.marqueeRect = { x: world.x, y: world.y, width: 0, height: 0 };
+      this.redraw();
+      return;
+    }
     this.clearSelection();
     this.drag = {
       kind: 'pan',
@@ -533,39 +549,62 @@ export class InteractionController {
         break;
       }
 
+      case 'marquee': {
+        const x = Math.min(this.drag.startWorld.x, world.x);
+        const y = Math.min(this.drag.startWorld.y, world.y);
+        const width = Math.abs(world.x - this.drag.startWorld.x);
+        const height = Math.abs(world.y - this.drag.startWorld.y);
+        this.marqueeRect = { x, y, width, height };
+        this.redraw();
+        break;
+      }
+
       case 'move-nodes': {
         const dx = world.x - this.drag.startWorld.x;
         const dy = world.y - this.drag.startWorld.y;
         if (!this.drag.moved && Math.hypot(dx, dy) < 1) break;
         this.drag.moved = true;
         this.snapLines = [];
+        this.spacingGuides = [];
 
-        // Snap lines for single-node drag (yEd style)
+        // Compute bounding box of moving selection at raw dragged position
+        let minX = Infinity;
+        let minY = Infinity;
+        let maxX = -Infinity;
+        let maxY = -Infinity;
+        for (const [id, orig] of this.drag.origins.entries()) {
+          const n = this.engine.getNode(id);
+          if (!n) continue;
+          const rx = orig.x + dx;
+          const ry = orig.y + dy;
+          minX = Math.min(minX, rx);
+          minY = Math.min(minY, ry);
+          maxX = Math.max(maxX, rx + n.geometry.width);
+          maxY = Math.max(maxY, ry + n.geometry.height);
+        }
+
         let snapOffsetX = 0;
         let snapOffsetY = 0;
-        if (this.drag.origins.size === 1 && !bypassSnap) {
-          const [movingId, orig] = Array.from(this.drag.origins.entries())[0];
-          const movingNode = this.engine.getNode(movingId);
-          if (movingNode) {
-            const rawX = orig.x + dx;
-            const rawY = orig.y + dy;
-            const cx = rawX + movingNode.geometry.width / 2;
-            const cy = rawY + movingNode.geometry.height / 2;
-            const threshold = 6;
+        let usedSmartSnapX = false;
+        let usedSmartSnapY = false;
 
-            for (const other of doc.nodes) {
-              if (other.id === movingId) continue;
-              const ocx = other.geometry.x + other.geometry.width / 2;
-              const ocy = other.geometry.y + other.geometry.height / 2;
-              if (Math.abs(cx - ocx) < threshold) {
-                snapOffsetX = ocx - cx;
-                this.snapLines.push({ orientation: 'vertical', value: ocx });
-              }
-              if (Math.abs(cy - ocy) < threshold) {
-                snapOffsetY = ocy - cy;
-                this.snapLines.push({ orientation: 'horizontal', value: ocy });
-              }
-            }
+        if (!bypassSnap && Number.isFinite(minX)) {
+          const others = doc.nodes.filter((n) => !this.drag || (this.drag.kind === 'move-nodes' && !this.drag.origins.has(n.id)));
+          const threshold = 6 / Math.max(0.25, Math.min(1.5, doc.viewport.zoom));
+          const smart = computeSmartSnap(
+            { x: minX, y: minY, width: maxX - minX, height: maxY - minY },
+            others,
+            threshold,
+          );
+          this.snapLines = smart.alignLines;
+          this.spacingGuides = smart.spacingGuides;
+          if (smart.alignLines.some((l) => l.orientation === 'vertical') || smart.spacingGuides.some((s) => s.orientation === 'horizontal')) {
+            snapOffsetX = smart.dx;
+            usedSmartSnapX = true;
+          }
+          if (smart.alignLines.some((l) => l.orientation === 'horizontal') || smart.spacingGuides.some((s) => s.orientation === 'vertical')) {
+            snapOffsetY = smart.dy;
+            usedSmartSnapY = true;
           }
         }
 
@@ -573,8 +612,8 @@ export class InteractionController {
         for (const [id, orig] of this.drag.origins.entries()) {
           const node = this.engine.getNode(id);
           if (!node) continue;
-          const nextX = snapOffsetX !== 0 ? orig.x + dx + snapOffsetX : this.snap(orig.x + dx, bypassSnap);
-          const nextY = snapOffsetY !== 0 ? orig.y + dy + snapOffsetY : this.snap(orig.y + dy, bypassSnap);
+          const nextX = usedSmartSnapX ? orig.x + dx + snapOffsetX : this.snap(orig.x + dx, bypassSnap);
+          const nextY = usedSmartSnapY ? orig.y + dy + snapOffsetY : this.snap(orig.y + dy, bypassSnap);
           node.geometry.x = nextX;
           node.geometry.y = nextY;
         }
@@ -683,8 +722,40 @@ export class InteractionController {
     const session = this.drag;
     this.drag = null;
     this.snapLines = [];
+    this.spacingGuides = [];
+    const finishedMarquee = this.marqueeRect;
+    this.marqueeRect = null;
 
     switch (session.kind) {
+      case 'marquee': {
+        if (finishedMarquee && (finishedMarquee.width > 4 || finishedMarquee.height > 4)) {
+          const doc = this.engine.getDocument();
+          const hitIds = doc.nodes
+            .filter((n) => {
+              const nx1 = n.geometry.x;
+              const ny1 = n.geometry.y;
+              const nx2 = nx1 + n.geometry.width;
+              const ny2 = ny1 + n.geometry.height;
+              const mx1 = finishedMarquee.x;
+              const my1 = finishedMarquee.y;
+              const mx2 = mx1 + finishedMarquee.width;
+              const my2 = my1 + finishedMarquee.height;
+              return nx1 <= mx2 && nx2 >= mx1 && ny1 <= my2 && ny2 >= my1;
+            })
+            .map((n) => n.id);
+          if (session.additive) {
+            for (const id of hitIds) this.selectedNodeIds.add(id);
+            this.selectedEdgeIds.clear();
+            this.emitSelection();
+          } else {
+            this.selectNodes(hitIds);
+            break;
+          }
+        }
+        this.redraw();
+        break;
+      }
+
       case 'move-nodes': {
         if (!session.moved) break;
         const finals = new Map<string, Point>();
@@ -704,6 +775,8 @@ export class InteractionController {
             commands.push({ type: 'node.update', id, patch: { geometry: { x: pt.x, y: pt.y } } });
           }
           this.engine.execute({ type: 'batch', commands, label: 'Move nodes' });
+        } else {
+          this.redraw();
         }
         break;
       }

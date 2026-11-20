@@ -1,3 +1,4 @@
+import type { AlignGuide, RectBox, SpacingGuide } from '../layout/alignment.js';
 import {
   computeEdgeLabelPosition,
   computeNodeLabelPosition,
@@ -41,7 +42,9 @@ export interface RenderState {
   showGrid: boolean;
   gridSize: number;
   draftEdge: { fromNodeId: string; toPoint: Point; targetNodeId: string | null } | null;
-  snapLines: Array<{ orientation: 'vertical' | 'horizontal'; value: number }>;
+  snapLines: AlignGuide[];
+  spacingGuides: SpacingGuide[];
+  marqueeRect: RectBox | null;
   /** Internal flag used during standalone SVG export to omit interactive hit paths. */
   exportMode?: boolean;
 }
@@ -588,35 +591,181 @@ export class SvgRenderer {
   ): void {
     const invZoom = 1 / Math.max(0.15, doc.viewport.zoom);
 
-    // Snap lines
+    // 1. yEd-style alignment guide lines with cross ticks at anchor points
+    const guideStroke = '#64748b';
+    const crossHalf = 3.5 * invZoom;
     for (const line of state.snapLines) {
       if (line.orientation === 'vertical') {
         this.overlayLayer.appendChild(
           el('line', {
             x1: line.value,
-            y1: -10000,
+            y1: line.from,
             x2: line.value,
-            y2: 10000,
-            stroke: '#3b82f6',
-            'stroke-width': invZoom,
-            'stroke-dasharray': `${4 * invZoom} ${4 * invZoom}`,
+            y2: line.to,
+            stroke: guideStroke,
+            'stroke-width': 1.1 * invZoom,
+            'stroke-dasharray': `${4 * invZoom} ${3 * invZoom}`,
             'pointer-events': 'none',
           }),
         );
+        for (const m of line.marks) {
+          this.overlayLayer.appendChild(
+            el('path', {
+              d: `M ${line.value - crossHalf} ${m - crossHalf} L ${line.value + crossHalf} ${m + crossHalf} M ${line.value + crossHalf} ${m - crossHalf} L ${line.value - crossHalf} ${m + crossHalf}`,
+              stroke: guideStroke,
+              'stroke-width': 1.2 * invZoom,
+              'pointer-events': 'none',
+            }),
+          );
+        }
       } else {
         this.overlayLayer.appendChild(
           el('line', {
-            x1: -10000,
+            x1: line.from,
             y1: line.value,
-            x2: 10000,
+            x2: line.to,
             y2: line.value,
-            stroke: '#3b82f6',
-            'stroke-width': invZoom,
-            'stroke-dasharray': `${4 * invZoom} ${4 * invZoom}`,
+            stroke: guideStroke,
+            'stroke-width': 1.1 * invZoom,
+            'stroke-dasharray': `${4 * invZoom} ${3 * invZoom}`,
             'pointer-events': 'none',
           }),
         );
+        for (const m of line.marks) {
+          this.overlayLayer.appendChild(
+            el('path', {
+              d: `M ${m - crossHalf} ${line.value - crossHalf} L ${m + crossHalf} ${line.value + crossHalf} M ${m + crossHalf} ${line.value - crossHalf} L ${m - crossHalf} ${line.value + crossHalf}`,
+              stroke: guideStroke,
+              'stroke-width': 1.2 * invZoom,
+              'pointer-events': 'none',
+            }),
+          );
+        }
       }
+    }
+
+    // 2. yEd-style equal-spacing distance guides (chevrons + axis line + gap pill)
+    const chevronSize = 4.5 * invZoom;
+    const capHalf = 5 * invZoom;
+    const spacingColor = '#2563eb';
+    for (const sg of state.spacingGuides) {
+      for (const seg of sg.segments) {
+        if (sg.orientation === 'vertical') {
+          const x = sg.axis;
+          const y1 = Math.min(seg.start, seg.end);
+          const y2 = Math.max(seg.start, seg.end);
+          const midY = (y1 + y2) / 2;
+          // Connector line + end caps + chevrons pointing at facing edges
+          this.overlayLayer.appendChild(
+            el('path', {
+              d: [
+                `M ${x} ${y1} L ${x} ${y2}`,
+                `M ${x - capHalf} ${y1} L ${x + capHalf} ${y1}`,
+                `M ${x - capHalf} ${y2} L ${x + capHalf} ${y2}`,
+                `M ${x - chevronSize} ${y1 + chevronSize} L ${x} ${y1} L ${x + chevronSize} ${y1 + chevronSize}`,
+                `M ${x - chevronSize} ${y2 - chevronSize} L ${x} ${y2} L ${x + chevronSize} ${y2 - chevronSize}`,
+              ].join(' '),
+              fill: 'none',
+              stroke: spacingColor,
+              'stroke-width': 1.25 * invZoom,
+              'pointer-events': 'none',
+            }),
+          );
+          if (y2 - y1 >= 18 * invZoom) {
+            const labelW = 26 * invZoom;
+            const labelH = 14 * invZoom;
+            this.overlayLayer.appendChild(
+              el('rect', {
+                x: x + 6 * invZoom,
+                y: midY - labelH / 2,
+                width: labelW,
+                height: labelH,
+                rx: 3 * invZoom,
+                fill: spacingColor,
+                'pointer-events': 'none',
+              }),
+            );
+            const txt = el('text', {
+              x: x + 6 * invZoom + labelW / 2,
+              y: midY,
+              'text-anchor': 'middle',
+              'dominant-baseline': 'central',
+              fill: '#ffffff',
+              'font-family': 'system-ui, sans-serif',
+              'font-size': 9.5 * invZoom,
+              'font-weight': 600,
+              'pointer-events': 'none',
+            });
+            txt.textContent = String(sg.gap);
+            this.overlayLayer.appendChild(txt);
+          }
+        } else {
+          const y = sg.axis;
+          const x1 = Math.min(seg.start, seg.end);
+          const x2 = Math.max(seg.start, seg.end);
+          const midX = (x1 + x2) / 2;
+          this.overlayLayer.appendChild(
+            el('path', {
+              d: [
+                `M ${x1} ${y} L ${x2} ${y}`,
+                `M ${x1} ${y - capHalf} L ${x1} ${y + capHalf}`,
+                `M ${x2} ${y - capHalf} L ${x2} ${y + capHalf}`,
+                `M ${x1 + chevronSize} ${y - chevronSize} L ${x1} ${y} L ${x1 + chevronSize} ${y + chevronSize}`,
+                `M ${x2 - chevronSize} ${y - chevronSize} L ${x2} ${y} L ${x2 - chevronSize} ${y + chevronSize}`,
+              ].join(' '),
+              fill: 'none',
+              stroke: spacingColor,
+              'stroke-width': 1.25 * invZoom,
+              'pointer-events': 'none',
+            }),
+          );
+          if (x2 - x1 >= 18 * invZoom) {
+            const labelW = 26 * invZoom;
+            const labelH = 14 * invZoom;
+            this.overlayLayer.appendChild(
+              el('rect', {
+                x: midX - labelW / 2,
+                y: y - labelH - 5 * invZoom,
+                width: labelW,
+                height: labelH,
+                rx: 3 * invZoom,
+                fill: spacingColor,
+                'pointer-events': 'none',
+              }),
+            );
+            const txt = el('text', {
+              x: midX,
+              y: y - labelH / 2 - 5 * invZoom,
+              'text-anchor': 'middle',
+              'dominant-baseline': 'central',
+              fill: '#ffffff',
+              'font-family': 'system-ui, sans-serif',
+              'font-size': 9.5 * invZoom,
+              'font-weight': 600,
+              'pointer-events': 'none',
+            });
+            txt.textContent = String(sg.gap);
+            this.overlayLayer.appendChild(txt);
+          }
+        }
+      }
+    }
+
+    // 3. Marquee box selection overlay (Shift+drag on empty canvas)
+    if (state.marqueeRect) {
+      this.overlayLayer.appendChild(
+        el('rect', {
+          x: state.marqueeRect.x,
+          y: state.marqueeRect.y,
+          width: state.marqueeRect.width,
+          height: state.marqueeRect.height,
+          fill: 'rgba(37, 99, 235, 0.08)',
+          stroke: '#2563eb',
+          'stroke-width': 1.25 * invZoom,
+          'stroke-dasharray': `${4 * invZoom} ${3 * invZoom}`,
+          'pointer-events': 'none',
+        }),
+      );
     }
 
     // Resize handles for single selected node (zoom-invariant size)
@@ -704,6 +853,8 @@ export class SvgRenderer {
       gridSize: 10,
       draftEdge: null,
       snapLines: [],
+      spacingGuides: [],
+      marqueeRect: null,
       exportMode: true,
     });
 

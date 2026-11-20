@@ -13,6 +13,7 @@ import {
 import { AppShell, Toaster, toast } from 'jenni-react';
 import { useEffect, useRef, useState } from 'react';
 import { EmbedDemo } from './components/EmbedDemo';
+import { JsonViewerModal } from './components/JsonViewerModal';
 import { NotesDock } from './components/NotesDock';
 import { PalettePanel } from './components/PalettePanel';
 import { PropertiesPanel } from './components/PropertiesPanel';
@@ -43,6 +44,7 @@ export function App() {
   const [tool, setTool] = useState<EditorTool>('select');
   const [showGrid, setShowGrid] = useState(true);
   const [notesOpen, setNotesOpen] = useState(false);
+  const [jsonOpen, setJsonOpen] = useState(false);
   const [hasNotes, setHasNotes] = useState(() => {
     try {
       return Boolean(localStorage.getItem('diagrav.reviewNotes')?.trim());
@@ -248,7 +250,7 @@ export function App() {
             showGrid={showGrid}
             onToggleGrid={handleToggleGrid}
             onFitView={() => diagravRef.current?.fitToView(48)}
-            onExportJson={handleExportJson}
+            onViewJson={() => setJsonOpen(true)}
             onExportSvg={handleExportSvg}
             onImportJson={() => fileInputRef.current?.click()}
             notesOpen={notesOpen}
@@ -267,6 +269,9 @@ export function App() {
               readOnly={viewMode === 'readonly'}
               onUpdateNode={handleUpdateNode}
               onUpdateEdge={handleUpdateEdge}
+              onAlignNodes={(a) => diagravRef.current?.alignSelected(a)}
+              onDistributeNodes={(m) => diagravRef.current?.distributeSelected(m)}
+              onMatchSizeNodes={(m) => diagravRef.current?.matchSizeSelected(m)}
               onDeleteSelection={handleDeleteSelection}
             />
           ) : undefined
@@ -324,6 +329,12 @@ export function App() {
         />
         {isEmbed && <EmbedDemo />}
       </AppShell>
+      <JsonViewerModal
+        open={jsonOpen}
+        onOpenChange={setJsonOpen}
+        doc={doc}
+        onDownload={handleExportJson}
+      />
       <Toaster position="bottom-right" />
     </>
   );

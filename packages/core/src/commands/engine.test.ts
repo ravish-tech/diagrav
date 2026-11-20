@@ -6,11 +6,15 @@ import {
   ShapeRegistry,
   computeEdgeLabelPosition,
   computeNodeLabelPosition,
+  computeSmartSnap,
+  createAlignNodesCommand,
   createDefaultEdge,
   createDefaultEdgeLabel,
   createDefaultNode,
   createDefaultNodeLabel,
+  createDistributeNodesCommand,
   createEmptyDocument,
+  createMatchSizeCommand,
   serializeMetadataJson,
   validateDocument,
 } from '../index.js';
@@ -210,4 +214,57 @@ test('serializeMetadataJson round-trips special characters safely', () => {
   const json = serializeMetadataJson(doc);
   const parsed = validateDocument(JSON.parse(json));
   assert.equal(parsed.meta.title, 'A -- B ]]> <tag> & C');
+});
+
+test('computeSmartSnap detects edge/center alignment and equal vertical spacing', () => {
+  const n1 = createDefaultNode({ id: 'n1', geometry: { x: 100, y: 0, width: 120, height: 60 } });
+  const n2 = createDefaultNode({ id: 'n2', geometry: { x: 100, y: 100, width: 120, height: 60 } });
+  // Gap between n1 (bottom=60) and n2 (top=100) is 40px.
+  // Moving node near x=102, y=198 should snap to x=100 (left/center/right align) and y=200 (40px equal gap).
+  const snap = computeSmartSnap({ x: 102, y: 198, width: 120, height: 60 }, [n1, n2], 6);
+  assert.equal(snap.dx, -2);
+  assert.equal(snap.dy, 2);
+  assert.ok(snap.alignLines.some((l) => l.orientation === 'vertical' && l.value === 160));
+  assert.equal(snap.spacingGuides.length, 1);
+  assert.equal(snap.spacingGuides[0].orientation, 'vertical');
+  assert.equal(snap.spacingGuides[0].gap, 40);
+});
+
+test('Align, Distribute, and Match Size commands work and undo cleanly', () => {
+  const engine = new CommandEngine();
+  const n1 = createDefaultNode({ id: 'n1', geometry: { x: 0, y: 10, width: 100, height: 50 } });
+  const n2 = createDefaultNode({ id: 'n2', geometry: { x: 120, y: 40, width: 80, height: 70 } });
+  const n3 = createDefaultNode({ id: 'n3', geometry: { x: 400, y: 90, width: 100, height: 50 } });
+  engine.execute({
+    type: 'batch',
+    commands: [
+      { type: 'node.create', node: n1 },
+      { type: 'node.create', node: n2 },
+      { type: 'node.create', node: n3 },
+    ],
+  });
+
+  // Align top
+  const alignCmd = createAlignNodesCommand(engine.getDocument(), ['n1', 'n2', 'n3'], 'top');
+  assert.ok(alignCmd);
+  engine.execute(alignCmd);
+  assert.equal(engine.getNode('n2')?.geometry.y, 10);
+  assert.equal(engine.getNode('n3')?.geometry.y, 10);
+
+  // Distribute horizontal gaps: span 0..500 (500px), sum widths = 280px, gap = 110px => n2.x = 100 + 110 = 210
+  const distCmd = createDistributeNodesCommand(engine.getDocument(), ['n1', 'n2', 'n3'], 'horizontal-gaps');
+  assert.ok(distCmd);
+  engine.execute(distCmd);
+  assert.equal(engine.getNode('n2')?.geometry.x, 210);
+
+  // Match size to n1 (100x50)
+  const sizeCmd = createMatchSizeCommand(engine.getDocument(), ['n1', 'n2', 'n3'], 'both');
+  assert.ok(sizeCmd);
+  engine.execute(sizeCmd);
+  assert.equal(engine.getNode('n2')?.geometry.width, 100);
+  assert.equal(engine.getNode('n2')?.geometry.height, 50);
+
+  // Undo restores n2 size
+  engine.undo();
+  assert.equal(engine.getNode('n2')?.geometry.width, 80);
 });

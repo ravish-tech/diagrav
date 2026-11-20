@@ -4,6 +4,7 @@ export * from './commands/engine.js';
 export * from './registries/shapes.js';
 export * from './registries/edges.js';
 export * from './registries/labels.js';
+export * from './layout/alignment.js';
 export * from './renderer/svg-renderer.js';
 export * from './renderer/interaction.js';
 export * from './diagram.js';

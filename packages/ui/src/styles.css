@@ -139,3 +139,54 @@ body,
   min-height: 0;
   padding: 8px 12px 10px;
 }
+
+.diagrav-align-grid-3 {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.diagrav-align-grid-2 {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.diagrav-json-viewer {
+  margin: 0;
+  padding: 14px 16px;
+  max-height: 62vh;
+  overflow: auto;
+  border-radius: 8px;
+  background: #0f172a;
+  color: #e2e8f0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  tab-size: 2;
+  white-space: pre;
+}
+
+.diagrav-json-key {
+  color: #7dd3fc;
+}
+
+.diagrav-json-str {
+  color: #86efac;
+}
+
+.diagrav-json-num {
+  color: #fcd34d;
+}
+
+.diagrav-json-bool {
+  color: #c4b5fd;
+}
+
+.diagrav-json-null {
+  color: #fda4af;
+}
+
+.diagrav-json-punct {
+  color: #94a3b8;
+}
