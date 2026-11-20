@@ -216,7 +216,8 @@ export function exportDocumentToSvg(
     );
   }
 
-  // Render nodes
+  // Render nodes (containers behind edges & normal nodes)
+  const containerFragments: string[] = [];
   const nodeFragments: string[] = [];
   for (const node of doc.nodes) {
     const def = shapes.get(node.type);
@@ -237,6 +238,17 @@ export function exportDocumentToSvg(
       filter: node.style.shadow ? 'url(#dg_exp_shadow)' : undefined,
     });
 
+    const decD = def.renderDecorations?.(width, height, node.style.border.radius);
+    const decSvg = decD
+      ? `<path ${attrsToString({
+          d: decD,
+          fill: 'none',
+          stroke: node.style.border.color,
+          'stroke-width': Math.max(1, node.style.border.width * 0.9),
+          'stroke-opacity': node.style.border.opacity ?? 1,
+        })}/>`
+      : '';
+
     const labelFragments: string[] = [];
     for (const lbl of node.labels) {
       if (!lbl.text) continue;
@@ -253,9 +265,9 @@ export function exportDocumentToSvg(
       );
     }
 
-    nodeFragments.push(
-      `<g class="diagrav-node" data-node-id="${escapeXml(node.id)}" transform="${transform}"><path ${pathAttrs}/>${labelFragments.join('')}</g>`,
-    );
+    const frag = `<g class="diagrav-node" data-node-id="${escapeXml(node.id)}" transform="${transform}"><path ${pathAttrs}/>${decSvg}${labelFragments.join('')}</g>`;
+    if (def.isContainer) containerFragments.push(frag);
+    else nodeFragments.push(frag);
   }
 
   const pad = 28;
@@ -277,6 +289,7 @@ export function exportDocumentToSvg(
     `<metadata data-diagrav-version="1">${metadataJson}</metadata>`,
     `<defs>${defs.join('')}</defs>`,
     `<g class="diagrav-viewport">`,
+    `<g class="diagrav-containers">${containerFragments.join('')}</g>`,
     `<g class="diagrav-edges">${edgeFragments.join('')}</g>`,
     `<g class="diagrav-nodes">${nodeFragments.join('')}</g>`,
     `</g>`,

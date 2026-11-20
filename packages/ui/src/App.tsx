@@ -1,6 +1,7 @@
 import {
   Diagrav,
   createDefaultNode,
+  createDefaultNodeLabel,
   validateDocument,
   type DiagramCommand,
   type DiagramDocument,
@@ -219,9 +220,14 @@ export function App() {
       pos = { x: center.x + offset, y: center.y + offset };
     }
 
+    const defaultLabel = createDefaultNodeLabel(shape.label);
+    if (shape.defaultLabelPlacement) {
+      defaultLabel.placement = { ...shape.defaultLabelPlacement };
+    }
+
     const node = createDefaultNode({
       type: shape.type,
-      labelText: shape.label,
+      labels: [defaultLabel],
       geometry: {
         x: Math.round(pos.x - shape.defaultSize.width / 2),
         y: Math.round(pos.y - shape.defaultSize.height / 2),
@@ -229,9 +235,15 @@ export function App() {
         height: shape.defaultSize.height,
       },
       style: {
+        fill: {
+          type: 'solid',
+          color: shape.defaultFillColor ?? '#f8fafc',
+          opacity: shape.isContainer ? 0.65 : 1,
+        },
         border: {
-          color: '#475569',
+          color: shape.defaultBorderColor ?? '#475569',
           width: 1.5,
+          dash: shape.defaultBorderDash ?? [],
           radius: shape.defaultBorderRadius ?? 0,
           opacity: 1,
         },

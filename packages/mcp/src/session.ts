@@ -131,10 +131,14 @@ export class DiagravMcpSession {
     shadow?: boolean;
   }) {
     const shapeDef = this.shapes.get(params.type ?? 'rounded-rect');
+    const lbl = createDefaultNodeLabel(params.label ?? shapeDef.label);
+    if (shapeDef.defaultLabelPlacement) {
+      lbl.placement = { ...shapeDef.defaultLabelPlacement };
+    }
     const node = createDefaultNode({
       id: params.id,
       type: shapeDef.type,
-      labelText: params.label ?? shapeDef.label,
+      labels: [lbl],
       geometry: {
         x: params.x ?? 100,
         y: params.y ?? 100,
@@ -144,10 +148,17 @@ export class DiagravMcpSession {
       style: {
         fill:
           params.fill ??
-          (params.fillColor ? { type: 'solid', color: params.fillColor, opacity: 1 } : undefined),
+          (params.fillColor
+            ? { type: 'solid', color: params.fillColor, opacity: 1 }
+            : {
+                type: 'solid',
+                color: shapeDef.defaultFillColor ?? '#f8fafc',
+                opacity: shapeDef.isContainer ? 0.65 : 1,
+              }),
         border: {
-          color: params.borderColor ?? '#475569',
+          color: params.borderColor ?? shapeDef.defaultBorderColor ?? '#475569',
           width: params.borderWidth ?? 1.5,
+          dash: shapeDef.defaultBorderDash ?? [],
           radius: params.borderRadius ?? shapeDef.defaultBorderRadius ?? 0,
           opacity: 1,
         },

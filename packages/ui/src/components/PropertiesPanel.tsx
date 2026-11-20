@@ -84,7 +84,17 @@ const FONT_WEIGHT_OPTIONS = [
   { value: '700', label: 'Bold' },
 ];
 
-const SHAPES_WITH_RADIUS = new Set(['rect', 'rounded-rect']);
+const SHAPES_WITH_RADIUS = new Set([
+  'rect',
+  'rounded-rect',
+  'fc-process',
+  'container-group',
+  'container-dashed',
+  'container-swimlane-v',
+  'container-swimlane-h',
+  'arch-server',
+  'uml-state',
+]);
 
 // Pure static fallback templates (never invoke generateId during render)
 const FALLBACK_NODE_LABEL: DiagramLabel<NodeLabelPlacement> = {

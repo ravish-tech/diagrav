@@ -56,6 +56,7 @@ export class SvgRenderer {
   private gridPattern: SVGPatternElement | null = null;
   private gridRect: SVGRectElement;
   private viewportGroup: SVGGElement;
+  private containersLayer: SVGGElement;
   private edgesLayer: SVGGElement;
   private nodesLayer: SVGGElement;
   private overlayLayer: SVGGElement;
@@ -97,11 +98,12 @@ export class SvgRenderer {
     });
 
     this.viewportGroup = el('g', { class: 'diagrav-viewport' });
+    this.containersLayer = el('g', { class: 'diagrav-containers' });
     this.edgesLayer = el('g', { class: 'diagrav-edges' });
     this.nodesLayer = el('g', { class: 'diagrav-nodes' });
     this.overlayLayer = el('g', { class: 'diagrav-overlay' });
 
-    this.viewportGroup.append(this.edgesLayer, this.nodesLayer, this.overlayLayer);
+    this.viewportGroup.append(this.containersLayer, this.edgesLayer, this.nodesLayer, this.overlayLayer);
     this.svg.append(this.defs, this.gridRect, this.viewportGroup);
     if (this.container) {
       this.container.appendChild(this.svg);
@@ -152,6 +154,7 @@ export class SvgRenderer {
 
   render(doc: DiagramDocument, state: RenderState): void {
     this.defs.innerHTML = '';
+    this.containersLayer.innerHTML = '';
     this.edgesLayer.innerHTML = '';
     this.nodesLayer.innerHTML = '';
     this.overlayLayer.innerHTML = '';
@@ -399,6 +402,22 @@ export class SvgRenderer {
     });
     g.appendChild(shapeEl);
 
+    if (def.renderDecorations) {
+      const decD = def.renderDecorations(width, height, node.style.border.radius);
+      if (decD) {
+        g.appendChild(
+          el('path', {
+            d: decD,
+            fill: 'none',
+            stroke: isSelected ? '#2563eb' : node.style.border.color,
+            'stroke-width': Math.max(1, node.style.border.width * 0.9),
+            'stroke-opacity': node.style.border.opacity ?? 1,
+            'pointer-events': 'none',
+          }),
+        );
+      }
+    }
+
     // Subtle 4-side port handles on hover in editor mode (yEd-style edge drag start)
     if (
       state.mode === 'editor' &&
@@ -452,7 +471,11 @@ export class SvgRenderer {
       g.appendChild(textEl);
     }
 
-    this.nodesLayer.appendChild(g);
+    if (def.isContainer) {
+      this.containersLayer.appendChild(g);
+    } else {
+      this.nodesLayer.appendChild(g);
+    }
   }
 
   private renderEdge(

@@ -247,6 +247,7 @@ export class InteractionController {
 
   private findNodeAt(world: Point, margin = 0): DiagramNode | null {
     const nodes = this.engine.getDocument().nodes;
+    let containerHit: DiagramNode | null = null;
     for (let i = nodes.length - 1; i >= 0; i--) {
       const n = nodes[i];
       if (
@@ -255,10 +256,13 @@ export class InteractionController {
         world.y >= n.geometry.y - margin &&
         world.y <= n.geometry.y + n.geometry.height + margin
       ) {
-        return n;
+        if (!this.shapes.get(n.type).isContainer) {
+          return n;
+        }
+        if (!containerHit) containerHit = n;
       }
     }
-    return null;
+    return containerHit;
   }
 
   private snap(val: number, bypass: boolean): number {
