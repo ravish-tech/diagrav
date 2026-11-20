@@ -21,6 +21,7 @@ import {
 } from '@diagrav/core';
 import {
   Button,
+  Collapsible,
   ColorPicker,
   Field,
   Input,
@@ -204,15 +205,16 @@ export function PropertiesPanel({
   onMatchSizeNodes,
   onDeleteSelection,
 }: PropertiesPanelProps) {
+  const [showAdvanced, setShowAdvanced] = useState(false);
+
   const multiCount = selection.nodeIds.length + selection.edgeIds.length;
   const multiNodes = selection.nodeIds.length;
 
-  // Multi-selection view (yEd-style Align, Distribute/Space Equally, Match Size)
+  // ── Multi-selection view (Align, Distribute/Space Equally, Match Size) ──
   if (multiCount > 1) {
     return (
       <div className="diagrav-panel">
         <Stack gap="item">
-          <div className="diagrav-section-title">Selection</div>
           <div style={{ fontSize: 13, color: 'var(--j-fg-muted, #64748b)' }}>
             <strong style={{ color: 'var(--j-fg, #0f172a)' }}>{multiCount} elements selected</strong>
             <br />
@@ -336,12 +338,11 @@ export function PropertiesPanel({
     );
   }
 
-  // Empty selection (document overview + shortcuts)
+  // ── Empty selection (document overview + shortcuts) ─────────────────────
   if (!selectedNode && !selectedEdge) {
     return (
       <div className="diagrav-panel">
         <Stack gap="item">
-          <div className="diagrav-section-title">Properties</div>
           <div style={{ fontSize: 13, color: 'var(--j-fg-muted, #64748b)' }}>
             <strong style={{ color: 'var(--j-fg, #0f172a)' }}>{doc.meta.title}</strong>
             <br />
@@ -364,9 +365,7 @@ export function PropertiesPanel({
             </div>
             <div className="diagrav-shortcut-row">
               <span>Undo / Redo</span>
-              <span>
-                <Kbd size="sm">⌘Z</Kbd>
-              </span>
+              <Kbd size="sm">⌘Z</Kbd>
             </div>
             <div className="diagrav-shortcut-row">
               <span>Duplicate</span>
@@ -386,10 +385,16 @@ export function PropertiesPanel({
     );
   }
 
+  // ── Node Properties (Simple on top, Advanced collapsible below) ─────────
   if (selectedNode) {
     const fill = selectedNode.style.fill;
     const primaryLabel = selectedNode.labels[0] ?? FALLBACK_NODE_LABEL;
-    const solidColor = fill.type === 'solid' ? fill.color : '#f8fafc';
+    const solidColor =
+      fill.type === 'solid'
+        ? fill.color
+        : fill.type === 'linear-gradient' || fill.type === 'radial-gradient'
+          ? fill.stops[0]?.color ?? '#f8fafc'
+          : '#f8fafc';
     const gradStart =
       fill.type === 'linear-gradient' || fill.type === 'radial-gradient'
         ? fill.stops[0]?.color ?? '#eff6ff'
@@ -429,6 +434,14 @@ export function PropertiesPanel({
       onUpdateNode(selectedNode.id, { style: { fill: nextFill } });
     };
 
+    const handleQuickFillColor = (c: string) => {
+      const nextFill: FillStyle =
+        fill.type === 'solid'
+          ? { ...fill, color: c }
+          : { type: 'solid', color: c, opacity: 1 };
+      onUpdateNode(selectedNode.id, { style: { fill: nextFill } }, `node-fill:${selectedNode.id}`);
+    };
+
     const updatePrimaryLabel = (
       patch: {
         text?: string;
@@ -455,245 +468,9 @@ export function PropertiesPanel({
 
     return (
       <div className="diagrav-panel">
-        <Stack gap="item">
-          <div className="diagrav-section-title">Node</div>
-
-          <Field label="Shape">
-            <Select
-              size="sm"
-              disabled={readOnly}
-              value={selectedNode.type}
-              onValueChange={(v) => onUpdateNode(selectedNode.id, { type: v })}
-              options={shapes.map((s) => ({ value: s.type, label: s.label }))}
-            />
-          </Field>
-
-          <div className="diagrav-prop-grid-2">
-            <Field label="X">
-              <NumberInput
-                size="sm"
-                disabled={readOnly}
-                value={Math.round(selectedNode.geometry.x)}
-                onValueChange={(v) =>
-                  v !== null && onUpdateNode(selectedNode.id, { geometry: { x: v } })
-                }
-              />
-            </Field>
-            <Field label="Y">
-              <NumberInput
-                size="sm"
-                disabled={readOnly}
-                value={Math.round(selectedNode.geometry.y)}
-                onValueChange={(v) =>
-                  v !== null && onUpdateNode(selectedNode.id, { geometry: { y: v } })
-                }
-              />
-            </Field>
-            <Field label="Width">
-              <NumberInput
-                size="sm"
-                min={36}
-                disabled={readOnly}
-                value={Math.round(selectedNode.geometry.width)}
-                onValueChange={(v) =>
-                  v !== null && onUpdateNode(selectedNode.id, { geometry: { width: v } })
-                }
-              />
-            </Field>
-            <Field label="Height">
-              <NumberInput
-                size="sm"
-                min={28}
-                disabled={readOnly}
-                value={Math.round(selectedNode.geometry.height)}
-                onValueChange={(v) =>
-                  v !== null && onUpdateNode(selectedNode.id, { geometry: { height: v } })
-                }
-              />
-            </Field>
-          </div>
-
-          <Separator />
-          <div className="diagrav-section-title">Fill</div>
-
-          <Field label="Fill Type">
-            <Select
-              size="sm"
-              disabled={readOnly}
-              value={fill.type}
-              onValueChange={handleFillTypeChange}
-              options={[
-                { value: 'solid', label: 'Solid' },
-                { value: 'linear-gradient', label: 'Linear Gradient' },
-                { value: 'radial-gradient', label: 'Radial Gradient' },
-                { value: 'none', label: 'None' },
-              ]}
-            />
-          </Field>
-
-          {fill.type === 'solid' && (
-            <Field label="Color">
-              <ColorPicker
-                size="sm"
-                disabled={readOnly}
-                value={fill.color}
-                onValueChange={(c) =>
-                  onUpdateNode(
-                    selectedNode.id,
-                    { style: { fill: { ...fill, color: c } } },
-                    `node-fill:${selectedNode.id}`,
-                  )
-                }
-              />
-            </Field>
-          )}
-
-          {(fill.type === 'linear-gradient' || fill.type === 'radial-gradient') && (
-            <>
-              <div className="diagrav-prop-grid-2">
-                <Field label="Start">
-                  <ColorPicker
-                    size="sm"
-                    disabled={readOnly}
-                    value={gradStart}
-                    onValueChange={(c) =>
-                      onUpdateNode(
-                        selectedNode.id,
-                        {
-                          style: {
-                            fill: {
-                              ...fill,
-                              stops: [
-                                { color: c, offset: 0 },
-                                { color: gradEnd, offset: 1 },
-                              ],
-                            },
-                          },
-                        },
-                        `node-grad-start:${selectedNode.id}`,
-                      )
-                    }
-                  />
-                </Field>
-                <Field label="End">
-                  <ColorPicker
-                    size="sm"
-                    disabled={readOnly}
-                    value={gradEnd}
-                    onValueChange={(c) =>
-                      onUpdateNode(
-                        selectedNode.id,
-                        {
-                          style: {
-                            fill: {
-                              ...fill,
-                              stops: [
-                                { color: gradStart, offset: 0 },
-                                { color: c, offset: 1 },
-                              ],
-                            },
-                          },
-                        },
-                        `node-grad-end:${selectedNode.id}`,
-                      )
-                    }
-                  />
-                </Field>
-              </div>
-              {fill.type === 'linear-gradient' && (
-                <Field label="Angle (°)">
-                  <NumberInput
-                    size="sm"
-                    min={0}
-                    max={360}
-                    step={15}
-                    disabled={readOnly}
-                    value={fill.angle}
-                    onValueChange={(v) =>
-                      v !== null &&
-                      onUpdateNode(selectedNode.id, { style: { fill: { ...fill, angle: v } } })
-                    }
-                  />
-                </Field>
-              )}
-            </>
-          )}
-
-          <Separator />
-          <div className="diagrav-section-title">Border</div>
-
-          <Field label="Color">
-            <ColorPicker
-              size="sm"
-              disabled={readOnly}
-              value={selectedNode.style.border.color}
-              onValueChange={(c) =>
-                onUpdateNode(
-                  selectedNode.id,
-                  { style: { border: { color: c } } },
-                  `node-border-color:${selectedNode.id}`,
-                )
-              }
-            />
-          </Field>
-
-          <div className={supportsRadius ? 'diagrav-prop-grid-2' : undefined}>
-            <Field label="Width">
-              <NumberInput
-                size="sm"
-                min={0}
-                max={12}
-                step={0.5}
-                disabled={readOnly}
-                value={selectedNode.style.border.width}
-                onValueChange={(v) =>
-                  v !== null &&
-                  onUpdateNode(selectedNode.id, { style: { border: { width: v } } })
-                }
-              />
-            </Field>
-            {supportsRadius && (
-              <Field label="Radius">
-                <NumberInput
-                  size="sm"
-                  min={0}
-                  max={48}
-                  disabled={readOnly}
-                  value={selectedNode.style.border.radius ?? 0}
-                  onValueChange={(v) =>
-                    v !== null &&
-                    onUpdateNode(selectedNode.id, { style: { border: { radius: v } } })
-                  }
-                />
-              </Field>
-            )}
-          </div>
-
-          <Switch
-            size="sm"
-            label="Dashed border"
-            disabled={readOnly}
-            checked={Boolean(selectedNode.style.border.dash?.length)}
-            onCheckedChange={(checked) =>
-              onUpdateNode(selectedNode.id, {
-                style: { border: { dash: checked ? [6, 4] : [] } },
-              })
-            }
-          />
-          <Switch
-            size="sm"
-            label="Drop shadow"
-            disabled={readOnly}
-            checked={Boolean(selectedNode.style.shadow)}
-            onCheckedChange={(checked) =>
-              onUpdateNode(selectedNode.id, { style: { shadow: checked } })
-            }
-          />
-
-          <Separator />
-          <div className="diagrav-section-title">Label</div>
-
-          <Field label="Text">
+        <Stack gap="related">
+          {/* Simple / Everyday Controls */}
+          <Field label="Label">
             <DebouncedTextInput
               key={selectedNode.id}
               disabled={readOnly}
@@ -702,116 +479,355 @@ export function PropertiesPanel({
             />
           </Field>
 
+          <Field label="Shape">
+            <Select
+              size="sm"
+              disabled={readOnly}
+              value={selectedNode.type}
+              onValueChange={(v) => onUpdateNode(selectedNode.id, { type: v })}
+              options={shapes.map((s) => ({ value: s.type, label: `${s.label} (${s.category})` }))}
+            />
+          </Field>
+
           <div className="diagrav-prop-grid-2">
-            <Field label="Model">
-              <Select
+            <Field label="Fill">
+              <ColorPicker
                 size="sm"
                 disabled={readOnly}
-                value={primaryLabel.placement.model}
-                onValueChange={(v) =>
-                  updatePrimaryLabel({
-                    placement: { model: v as NodeLabelPlacement['model'] },
-                  })
-                }
-                options={[
-                  { value: 'internal', label: 'Internal' },
-                  { value: 'external', label: 'External' },
-                  { value: 'free', label: 'Free' },
-                ]}
+                value={solidColor}
+                onValueChange={handleQuickFillColor}
               />
             </Field>
-            {primaryLabel.placement.model !== 'free' && (
-              <Field label="Position">
+            <Field label="Border">
+              <ColorPicker
+                size="sm"
+                disabled={readOnly}
+                value={selectedNode.style.border.color}
+                onValueChange={(c) =>
+                  onUpdateNode(
+                    selectedNode.id,
+                    { style: { border: { color: c } } },
+                    `node-border-color:${selectedNode.id}`,
+                  )
+                }
+              />
+            </Field>
+          </div>
+
+          <div className="diagrav-prop-grid-2">
+            <Switch
+              size="sm"
+              label="Dashed"
+              disabled={readOnly}
+              checked={Boolean(selectedNode.style.border.dash?.length)}
+              onCheckedChange={(checked) =>
+                onUpdateNode(selectedNode.id, {
+                  style: { border: { dash: checked ? [6, 4] : [] } },
+                })
+              }
+            />
+            <Switch
+              size="sm"
+              label="Shadow"
+              disabled={readOnly}
+              checked={Boolean(selectedNode.style.shadow)}
+              onCheckedChange={(checked) =>
+                onUpdateNode(selectedNode.id, { style: { shadow: checked } })
+              }
+            />
+          </div>
+
+          {/* Advanced Properties (Collapsed by default) */}
+          <Collapsible
+            variant="card"
+            size="sm"
+            title="Advanced Properties"
+            open={showAdvanced}
+            onOpenChange={setShowAdvanced}
+          >
+            <Stack gap="related">
+              <div className="diagrav-section-title">Position &amp; Size</div>
+              <div className="diagrav-prop-grid-2">
+                <Field label="X">
+                  <NumberInput
+                    size="sm"
+                    disabled={readOnly}
+                    value={Math.round(selectedNode.geometry.x)}
+                    onValueChange={(v) =>
+                      v !== null && onUpdateNode(selectedNode.id, { geometry: { x: v } })
+                    }
+                  />
+                </Field>
+                <Field label="Y">
+                  <NumberInput
+                    size="sm"
+                    disabled={readOnly}
+                    value={Math.round(selectedNode.geometry.y)}
+                    onValueChange={(v) =>
+                      v !== null && onUpdateNode(selectedNode.id, { geometry: { y: v } })
+                    }
+                  />
+                </Field>
+                <Field label="Width">
+                  <NumberInput
+                    size="sm"
+                    min={36}
+                    disabled={readOnly}
+                    value={Math.round(selectedNode.geometry.width)}
+                    onValueChange={(v) =>
+                      v !== null && onUpdateNode(selectedNode.id, { geometry: { width: v } })
+                    }
+                  />
+                </Field>
+                <Field label="Height">
+                  <NumberInput
+                    size="sm"
+                    min={28}
+                    disabled={readOnly}
+                    value={Math.round(selectedNode.geometry.height)}
+                    onValueChange={(v) =>
+                      v !== null && onUpdateNode(selectedNode.id, { geometry: { height: v } })
+                    }
+                  />
+                </Field>
+              </div>
+
+              <Separator />
+              <div className="diagrav-section-title">Fill &amp; Gradient</div>
+              <Field label="Fill Type">
                 <Select
                   size="sm"
                   disabled={readOnly}
-                  value={primaryLabel.placement.position}
-                  onValueChange={(v) =>
-                    updatePrimaryLabel({
-                      placement: { position: v as NodeLabelPosition },
-                    })
-                  }
-                  options={NODE_LABEL_POS_OPTIONS}
+                  value={fill.type}
+                  onValueChange={handleFillTypeChange}
+                  options={[
+                    { value: 'solid', label: 'Solid' },
+                    { value: 'linear-gradient', label: 'Linear Gradient' },
+                    { value: 'radial-gradient', label: 'Radial Gradient' },
+                    { value: 'none', label: 'None' },
+                  ]}
                 />
               </Field>
-            )}
-          </div>
 
-          {primaryLabel.placement.model === 'free' && (
-            <div className="diagrav-prop-grid-2">
-              <Field label="Offset X">
-                <NumberInput
+              {(fill.type === 'linear-gradient' || fill.type === 'radial-gradient') && (
+                <>
+                  <div className="diagrav-prop-grid-2">
+                    <Field label="Start">
+                      <ColorPicker
+                        size="sm"
+                        disabled={readOnly}
+                        value={gradStart}
+                        onValueChange={(c) =>
+                          onUpdateNode(
+                            selectedNode.id,
+                            {
+                              style: {
+                                fill: {
+                                  ...fill,
+                                  stops: [
+                                    { color: c, offset: 0 },
+                                    { color: gradEnd, offset: 1 },
+                                  ],
+                                },
+                              },
+                            },
+                            `node-grad-start:${selectedNode.id}`,
+                          )
+                        }
+                      />
+                    </Field>
+                    <Field label="End">
+                      <ColorPicker
+                        size="sm"
+                        disabled={readOnly}
+                        value={gradEnd}
+                        onValueChange={(c) =>
+                          onUpdateNode(
+                            selectedNode.id,
+                            {
+                              style: {
+                                fill: {
+                                  ...fill,
+                                  stops: [
+                                    { color: gradStart, offset: 0 },
+                                    { color: c, offset: 1 },
+                                  ],
+                                },
+                              },
+                            },
+                            `node-grad-end:${selectedNode.id}`,
+                          )
+                        }
+                      />
+                    </Field>
+                  </div>
+                  {fill.type === 'linear-gradient' && (
+                    <Field label="Angle (°)">
+                      <NumberInput
+                        size="sm"
+                        min={0}
+                        max={360}
+                        step={15}
+                        disabled={readOnly}
+                        value={fill.angle}
+                        onValueChange={(v) =>
+                          v !== null &&
+                          onUpdateNode(selectedNode.id, { style: { fill: { ...fill, angle: v } } })
+                        }
+                      />
+                    </Field>
+                  )}
+                </>
+              )}
+
+              <Separator />
+              <div className="diagrav-section-title">Border Details</div>
+              <div className={supportsRadius ? 'diagrav-prop-grid-2' : undefined}>
+                <Field label="Width">
+                  <NumberInput
+                    size="sm"
+                    min={0}
+                    max={12}
+                    step={0.5}
+                    disabled={readOnly}
+                    value={selectedNode.style.border.width}
+                    onValueChange={(v) =>
+                      v !== null &&
+                      onUpdateNode(selectedNode.id, { style: { border: { width: v } } })
+                    }
+                  />
+                </Field>
+                {supportsRadius && (
+                  <Field label="Radius">
+                    <NumberInput
+                      size="sm"
+                      min={0}
+                      max={48}
+                      disabled={readOnly}
+                      value={selectedNode.style.border.radius ?? 0}
+                      onValueChange={(v) =>
+                        v !== null &&
+                        onUpdateNode(selectedNode.id, { style: { border: { radius: v } } })
+                      }
+                    />
+                  </Field>
+                )}
+              </div>
+
+              <Separator />
+              <div className="diagrav-section-title">Label Style &amp; Placement</div>
+              <div className="diagrav-prop-grid-2">
+                <Field label="Model">
+                  <Select
+                    size="sm"
+                    disabled={readOnly}
+                    value={primaryLabel.placement.model}
+                    onValueChange={(v) =>
+                      updatePrimaryLabel({
+                        placement: { model: v as NodeLabelPlacement['model'] },
+                      })
+                    }
+                    options={[
+                      { value: 'internal', label: 'Internal' },
+                      { value: 'external', label: 'External' },
+                      { value: 'free', label: 'Free' },
+                    ]}
+                  />
+                </Field>
+                {primaryLabel.placement.model !== 'free' && (
+                  <Field label="Position">
+                    <Select
+                      size="sm"
+                      disabled={readOnly}
+                      value={primaryLabel.placement.position}
+                      onValueChange={(v) =>
+                        updatePrimaryLabel({
+                          placement: { position: v as NodeLabelPosition },
+                        })
+                      }
+                      options={NODE_LABEL_POS_OPTIONS}
+                    />
+                  </Field>
+                )}
+              </div>
+
+              {primaryLabel.placement.model === 'free' && (
+                <div className="diagrav-prop-grid-2">
+                  <Field label="Offset X">
+                    <NumberInput
+                      size="sm"
+                      disabled={readOnly}
+                      value={Math.round(primaryLabel.placement.offset?.x ?? 0)}
+                      onValueChange={(v) =>
+                        v !== null &&
+                        updatePrimaryLabel({
+                          placement: {
+                            offset: { x: v, y: primaryLabel.placement.offset?.y ?? 0 },
+                          },
+                        })
+                      }
+                    />
+                  </Field>
+                  <Field label="Offset Y">
+                    <NumberInput
+                      size="sm"
+                      disabled={readOnly}
+                      value={Math.round(primaryLabel.placement.offset?.y ?? 0)}
+                      onValueChange={(v) =>
+                        v !== null &&
+                        updatePrimaryLabel({
+                          placement: {
+                            offset: { x: primaryLabel.placement.offset?.x ?? 0, y: v },
+                          },
+                        })
+                      }
+                    />
+                  </Field>
+                </div>
+              )}
+
+              <div className="diagrav-prop-grid-2">
+                <Field label="Font Size">
+                  <NumberInput
+                    size="sm"
+                    min={8}
+                    max={48}
+                    disabled={readOnly}
+                    value={primaryLabel.style.fontSize}
+                    onValueChange={(v) =>
+                      v !== null && updatePrimaryLabel({ style: { fontSize: v } })
+                    }
+                  />
+                </Field>
+                <Field label="Weight">
+                  <Select
+                    size="sm"
+                    disabled={readOnly}
+                    value={String(primaryLabel.style.fontWeight ?? 500)}
+                    onValueChange={(v) => updatePrimaryLabel({ style: { fontWeight: Number(v) } })}
+                    options={FONT_WEIGHT_OPTIONS}
+                  />
+                </Field>
+              </div>
+
+              <Field label="Text Color">
+                <ColorPicker
                   size="sm"
                   disabled={readOnly}
-                  value={Math.round(primaryLabel.placement.offset?.x ?? 0)}
-                  onValueChange={(v) =>
-                    v !== null &&
-                    updatePrimaryLabel({
-                      placement: {
-                        offset: { x: v, y: primaryLabel.placement.offset?.y ?? 0 },
-                      },
-                    })
+                  value={primaryLabel.style.color}
+                  onValueChange={(color) =>
+                    updatePrimaryLabel({ style: { color } }, `node-lbl-color:${selectedNode.id}`)
                   }
                 />
               </Field>
-              <Field label="Offset Y">
-                <NumberInput
-                  size="sm"
-                  disabled={readOnly}
-                  value={Math.round(primaryLabel.placement.offset?.y ?? 0)}
-                  onValueChange={(v) =>
-                    v !== null &&
-                    updatePrimaryLabel({
-                      placement: {
-                        offset: { x: primaryLabel.placement.offset?.x ?? 0, y: v },
-                      },
-                    })
-                  }
-                />
-              </Field>
-            </div>
-          )}
-
-          <div className="diagrav-prop-grid-2">
-            <Field label="Font Size">
-              <NumberInput
-                size="sm"
-                min={8}
-                max={48}
-                disabled={readOnly}
-                value={primaryLabel.style.fontSize}
-                onValueChange={(v) =>
-                  v !== null && updatePrimaryLabel({ style: { fontSize: v } })
-                }
-              />
-            </Field>
-            <Field label="Weight">
-              <Select
-                size="sm"
-                disabled={readOnly}
-                value={String(primaryLabel.style.fontWeight ?? 500)}
-                onValueChange={(v) => updatePrimaryLabel({ style: { fontWeight: Number(v) } })}
-                options={FONT_WEIGHT_OPTIONS}
-              />
-            </Field>
-          </div>
-
-          <Field label="Text Color">
-            <ColorPicker
-              size="sm"
-              disabled={readOnly}
-              value={primaryLabel.style.color}
-              onValueChange={(color) =>
-                updatePrimaryLabel({ style: { color } }, `node-lbl-color:${selectedNode.id}`)
-              }
-            />
-          </Field>
+            </Stack>
+          </Collapsible>
         </Stack>
       </div>
     );
   }
 
-  // Edge properties
+  // ── Connection (Edge) Properties (Simple on top, Advanced below) ────────
   const edge = selectedEdge!;
   const edgeLabel = edge.labels[0] ?? FALLBACK_EDGE_LABEL;
 
@@ -839,8 +855,16 @@ export function PropertiesPanel({
 
   return (
     <div className="diagrav-panel">
-      <Stack gap="item">
-        <div className="diagrav-section-title">Connection</div>
+      <Stack gap="related">
+        {/* Simple / Everyday Controls */}
+        <Field label="Label">
+          <DebouncedTextInput
+            key={edge.id}
+            disabled={readOnly}
+            value={edgeLabel.text}
+            onCommit={(text) => updateEdgeLabel({ text })}
+          />
+        </Field>
 
         <Field label="Routing">
           <Select
@@ -886,31 +910,6 @@ export function PropertiesPanel({
           }
         />
 
-        <div className="diagrav-prop-grid-2">
-          <Field label="Source Arrow">
-            <Select
-              size="sm"
-              disabled={readOnly}
-              value={edge.style.sourceArrow}
-              onValueChange={(v) =>
-                onUpdateEdge(edge.id, { style: { sourceArrow: v as ArrowType } })
-              }
-              options={ARROW_OPTIONS}
-            />
-          </Field>
-          <Field label="Target Arrow">
-            <Select
-              size="sm"
-              disabled={readOnly}
-              value={edge.style.targetArrow}
-              onValueChange={(v) =>
-                onUpdateEdge(edge.id, { style: { targetArrow: v as ArrowType } })
-              }
-              options={ARROW_OPTIONS}
-            />
-          </Field>
-        </div>
-
         {edge.bends.length > 0 && (
           <Button
             size="sm"
@@ -922,103 +921,130 @@ export function PropertiesPanel({
           </Button>
         )}
 
-        <Separator />
-        <div className="diagrav-section-title">Edge Label</div>
+        {/* Advanced Properties (Collapsed by default) */}
+        <Collapsible
+          variant="card"
+          size="sm"
+          title="Advanced Properties"
+          open={showAdvanced}
+          onOpenChange={setShowAdvanced}
+        >
+          <Stack gap="related">
+            <div className="diagrav-section-title">Arrowheads</div>
+            <div className="diagrav-prop-grid-2">
+              <Field label="Source">
+                <Select
+                  size="sm"
+                  disabled={readOnly}
+                  value={edge.style.sourceArrow}
+                  onValueChange={(v) =>
+                    onUpdateEdge(edge.id, { style: { sourceArrow: v as ArrowType } })
+                  }
+                  options={ARROW_OPTIONS}
+                />
+              </Field>
+              <Field label="Target">
+                <Select
+                  size="sm"
+                  disabled={readOnly}
+                  value={edge.style.targetArrow}
+                  onValueChange={(v) =>
+                    onUpdateEdge(edge.id, { style: { targetArrow: v as ArrowType } })
+                  }
+                  options={ARROW_OPTIONS}
+                />
+              </Field>
+            </div>
 
-        <Field label="Text">
-          <DebouncedTextInput
-            key={edge.id}
-            disabled={readOnly}
-            value={edgeLabel.text}
-            onCommit={(text) => updateEdgeLabel({ text })}
-          />
-        </Field>
+            <Separator />
+            <div className="diagrav-section-title">Label Style &amp; Placement</div>
+            <div className="diagrav-prop-grid-2">
+              <Field label="Placement">
+                <Select
+                  size="sm"
+                  disabled={readOnly}
+                  value={edgeLabel.placement.model}
+                  onValueChange={(v) =>
+                    updateEdgeLabel({
+                      placement: { model: v as EdgeLabelPlacement['model'] },
+                    })
+                  }
+                  options={[
+                    { value: 'center', label: 'Center' },
+                    { value: 'source', label: 'Source' },
+                    { value: 'target', label: 'Target' },
+                    { value: 'ratio', label: 'Ratio' },
+                    { value: 'free', label: 'Free' },
+                  ]}
+                />
+              </Field>
+              <Field label="Distance">
+                <NumberInput
+                  size="sm"
+                  min={-60}
+                  max={60}
+                  step={2}
+                  disabled={readOnly}
+                  value={edgeLabel.placement.distance ?? -10}
+                  onValueChange={(v) =>
+                    v !== null && updateEdgeLabel({ placement: { distance: v } })
+                  }
+                />
+              </Field>
+            </div>
 
-        <div className="diagrav-prop-grid-2">
-          <Field label="Placement">
-            <Select
-              size="sm"
-              disabled={readOnly}
-              value={edgeLabel.placement.model}
-              onValueChange={(v) =>
-                updateEdgeLabel({
-                  placement: { model: v as EdgeLabelPlacement['model'] },
-                })
-              }
-              options={[
-                { value: 'center', label: 'Center' },
-                { value: 'source', label: 'Source' },
-                { value: 'target', label: 'Target' },
-                { value: 'ratio', label: 'Ratio' },
-                { value: 'free', label: 'Free' },
-              ]}
-            />
-          </Field>
-          <Field label="Distance">
-            <NumberInput
-              size="sm"
-              min={-60}
-              max={60}
-              step={2}
-              disabled={readOnly}
-              value={edgeLabel.placement.distance ?? -10}
-              onValueChange={(v) =>
-                v !== null && updateEdgeLabel({ placement: { distance: v } })
-              }
-            />
-          </Field>
-        </div>
+            {edgeLabel.placement.model === 'ratio' && (
+              <Field label="Ratio (0–1)">
+                <NumberInput
+                  size="sm"
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  disabled={readOnly}
+                  value={edgeLabel.placement.ratio ?? 0.5}
+                  onValueChange={(v) =>
+                    v !== null &&
+                    updateEdgeLabel({ placement: { ratio: Math.max(0, Math.min(1, v)) } })
+                  }
+                />
+              </Field>
+            )}
 
-        {edgeLabel.placement.model === 'ratio' && (
-          <Field label="Ratio (0–1)">
-            <NumberInput
-              size="sm"
-              min={0}
-              max={1}
-              step={0.05}
-              disabled={readOnly}
-              value={edgeLabel.placement.ratio ?? 0.5}
-              onValueChange={(v) =>
-                v !== null &&
-                updateEdgeLabel({ placement: { ratio: Math.max(0, Math.min(1, v)) } })
-              }
-            />
-          </Field>
-        )}
+            <div className="diagrav-prop-grid-2">
+              <Field label="Font Size">
+                <NumberInput
+                  size="sm"
+                  min={8}
+                  max={36}
+                  disabled={readOnly}
+                  value={edgeLabel.style.fontSize}
+                  onValueChange={(v) => v !== null && updateEdgeLabel({ style: { fontSize: v } })}
+                />
+              </Field>
+              <Field label="Text Color">
+                <ColorPicker
+                  size="sm"
+                  disabled={readOnly}
+                  value={edgeLabel.style.color}
+                  onValueChange={(color) =>
+                    updateEdgeLabel({ style: { color } }, `edge-lbl-color:${edge.id}`)
+                  }
+                />
+              </Field>
+            </div>
 
-        <div className="diagrav-prop-grid-2">
-          <Field label="Font Size">
-            <NumberInput
-              size="sm"
-              min={8}
-              max={36}
-              disabled={readOnly}
-              value={edgeLabel.style.fontSize}
-              onValueChange={(v) => v !== null && updateEdgeLabel({ style: { fontSize: v } })}
-            />
-          </Field>
-          <Field label="Text Color">
-            <ColorPicker
-              size="sm"
-              disabled={readOnly}
-              value={edgeLabel.style.color}
-              onValueChange={(color) =>
-                updateEdgeLabel({ style: { color } }, `edge-lbl-color:${edge.id}`)
-              }
-            />
-          </Field>
-        </div>
-
-        <Field label="Background">
-          <ColorPicker
-            size="sm"
-            disabled={readOnly}
-            value={edgeLabel.style.background ?? '#ffffff'}
-            onValueChange={(background) =>
-              updateEdgeLabel({ style: { background } }, `edge-lbl-bg:${edge.id}`)
-            }
-          />
-        </Field>
+            <Field label="Background">
+              <ColorPicker
+                size="sm"
+                disabled={readOnly}
+                value={edgeLabel.style.background ?? '#ffffff'}
+                onValueChange={(background) =>
+                  updateEdgeLabel({ style: { background } }, `edge-lbl-bg:${edge.id}`)
+                }
+              />
+            </Field>
+          </Stack>
+        </Collapsible>
       </Stack>
     </div>
   );
