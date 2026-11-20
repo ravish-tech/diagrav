@@ -2,7 +2,12 @@ import type { CommandEngine } from '../commands/engine.js';
 import type { DiagramCommand } from '../commands/types.js';
 import { computeSmartSnap, type RectBox } from '../layout/alignment.js';
 import { pointAlongPolyline, type EdgeRouterRegistry } from '../registries/edges.js';
-import { computeEdgeLabelPosition, computeNodeLabelPosition } from '../registries/labels.js';
+import {
+  computeEdgeLabelPosition,
+  computeNodeLabelPosition,
+  resolveEdgeLabelDrop,
+  resolveNodeLabelDrop,
+} from '../registries/labels.js';
 import type { ShapeRegistry } from '../registries/shapes.js';
 import {
   createDefaultEdge,
@@ -12,7 +17,9 @@ import {
   type DiagramEdge,
   type DiagramMode,
   type DiagramNode,
+  type EdgeLabelPlacement,
   type EditorTool,
+  type NodeLabelPlacement,
   type Point,
 } from '../schema/types.js';
 import type { RenderState, SvgRenderer } from './svg-renderer.js';
@@ -62,6 +69,16 @@ type DragSession =
       origRouting: DiagramEdge['routing'];
       isNewBend: boolean;
       moved: boolean;
+    }
+  | {
+      kind: 'move-label';
+      targetKind: 'node' | 'edge';
+      targetId: string;
+      labelId: string;
+      startClientX: number;
+      startClientY: number;
+      origPlacement: NodeLabelPlacement | EdgeLabelPlacement;
+      moved: boolean;
     };
 
 function distToSegment(p: Point, a: Point, b: Point): number {
@@ -95,6 +112,7 @@ export class InteractionController {
   private snapLines: RenderState['snapLines'] = [];
   private spacingGuides: RenderState['spacingGuides'] = [];
   private marqueeRect: RectBox | null = null;
+  private draggingLabel: RenderState['draggingLabel'] = null;
   private drag: DragSession | null = null;
   private selectionListeners = new Set<SelectionListener>();
   private activeInlineInput: HTMLInputElement | null = null;
@@ -124,6 +142,7 @@ export class InteractionController {
       snapLines: this.snapLines,
       spacingGuides: this.spacingGuides,
       marqueeRect: this.marqueeRect,
+      draggingLabel: this.draggingLabel,
     };
   }
 
@@ -139,6 +158,7 @@ export class InteractionController {
       this.snapLines = [];
       this.spacingGuides = [];
       this.marqueeRect = null;
+      this.draggingLabel = null;
       this.hoveredNodeId = null;
       this.closeInlineEditor(false);
     }
@@ -297,7 +317,22 @@ export class InteractionController {
     this.snapLines = [];
     this.spacingGuides = [];
     this.marqueeRect = null;
+    this.draggingLabel = null;
     this.draftEdge = null;
+
+    if (session.kind === 'move-label') {
+      if (session.targetKind === 'node') {
+        const n = this.engine.getNode(session.targetId);
+        const lbl = n?.labels.find((l) => l.id === session.labelId);
+        if (lbl) lbl.placement = structuredClone(session.origPlacement) as NodeLabelPlacement;
+      } else {
+        const e = this.engine.getEdge(session.targetId);
+        const lbl = e?.labels.find((l) => l.id === session.labelId);
+        if (lbl) lbl.placement = structuredClone(session.origPlacement) as EdgeLabelPlacement;
+      }
+      this.redraw();
+      return;
+    }
 
     if (session.kind === 'move-nodes') {
       for (const [id, orig] of session.origins.entries()) {
@@ -409,6 +444,47 @@ export class InteractionController {
         };
       }
       return;
+    }
+
+    // 3b. Label handle => drag-to-place label directly on canvas
+    const labelEl = target?.closest('[data-label-id]') as Element | null;
+    const labelId = labelEl?.getAttribute('data-label-id');
+    const labelTargetId = labelEl?.getAttribute('data-label-target-id');
+    const labelKind = labelEl?.getAttribute('data-label-kind') as 'node' | 'edge' | null;
+    if (this.mode === 'editor' && labelId && labelTargetId && labelKind) {
+      if (labelKind === 'node') {
+        const node = this.engine.getNode(labelTargetId);
+        const lbl = node?.labels.find((l) => l.id === labelId);
+        if (lbl) {
+          this.drag = {
+            kind: 'move-label',
+            targetKind: 'node',
+            targetId: labelTargetId,
+            labelId,
+            startClientX: e.clientX,
+            startClientY: e.clientY,
+            origPlacement: structuredClone(lbl.placement),
+            moved: false,
+          };
+          return;
+        }
+      } else {
+        const edge = this.engine.getEdge(labelTargetId);
+        const lbl = edge?.labels.find((l) => l.id === labelId);
+        if (lbl) {
+          this.drag = {
+            kind: 'move-label',
+            targetKind: 'edge',
+            targetId: labelTargetId,
+            labelId,
+            startClientX: e.clientX,
+            startClientY: e.clientY,
+            origPlacement: structuredClone(lbl.placement),
+            moved: false,
+          };
+          return;
+        }
+      }
     }
 
     // 4. Node hit
@@ -718,6 +794,54 @@ export class InteractionController {
         }
         break;
       }
+
+      case 'move-label': {
+        if (!this.drag.moved) {
+          const dist = Math.hypot(e.clientX - this.drag.startClientX, e.clientY - this.drag.startClientY);
+          if (dist < 3) break;
+          this.drag.moved = true;
+        }
+        const { labelId } = this.drag;
+        if (this.drag.targetKind === 'node') {
+          const node = this.engine.getNode(this.drag.targetId);
+          const lbl = node?.labels.find((l) => l.id === labelId);
+          if (node && lbl) {
+            const snapThresh = bypassSnap ? 0 : 10 / Math.max(0.25, doc.viewport.zoom);
+            lbl.placement = resolveNodeLabelDrop(node, lbl, world, snapThresh);
+            const pos = computeNodeLabelPosition(node, lbl);
+            this.draggingLabel = {
+              kind: 'node',
+              targetId: node.id,
+              labelId: lbl.id,
+              from: { x: node.geometry.x + node.geometry.width / 2, y: node.geometry.y + node.geometry.height / 2 },
+              to: { x: pos.x, y: pos.y },
+            };
+            this.redraw();
+          }
+        } else {
+          const edge = this.engine.getEdge(this.drag.targetId);
+          const lbl = edge?.labels.find((l) => l.id === labelId);
+          if (edge && lbl) {
+            const src = this.engine.getNode(edge.source.nodeId);
+            const tgt = this.engine.getNode(edge.target.nodeId);
+            if (src && tgt) {
+              const routed = this.routers.get(edge.routing).route(src, tgt, edge, this.shapes);
+              lbl.placement = resolveEdgeLabelDrop(routed.points, world);
+              const pos = computeEdgeLabelPosition(routed.points, lbl);
+              const anchor = pointAlongPolyline(routed.points, lbl.placement.model === 'ratio' ? (lbl.placement.ratio ?? 0.5) : 0.5).point;
+              this.draggingLabel = {
+                kind: 'edge',
+                targetId: edge.id,
+                labelId: lbl.id,
+                from: anchor,
+                to: { x: pos.x, y: pos.y },
+              };
+              this.redraw();
+            }
+          }
+        }
+        break;
+      }
     }
   };
 
@@ -727,6 +851,7 @@ export class InteractionController {
     this.drag = null;
     this.snapLines = [];
     this.spacingGuides = [];
+    this.draggingLabel = null;
     const finishedMarquee = this.marqueeRect;
     this.marqueeRect = null;
 
@@ -846,6 +971,38 @@ export class InteractionController {
         }
         break;
       }
+
+      case 'move-label': {
+        if (!session.moved) break;
+        if (session.targetKind === 'node') {
+          const node = this.engine.getNode(session.targetId);
+          const lbl = node?.labels.find((l) => l.id === session.labelId);
+          if (node && lbl) {
+            const finalLabel = structuredClone(lbl);
+            lbl.placement = structuredClone(session.origPlacement) as NodeLabelPlacement;
+            this.engine.execute({
+              type: 'label.upsert',
+              targetKind: 'node',
+              targetId: node.id,
+              label: finalLabel,
+            });
+          }
+        } else {
+          const edge = this.engine.getEdge(session.targetId);
+          const lbl = edge?.labels.find((l) => l.id === session.labelId);
+          if (edge && lbl) {
+            const finalLabel = structuredClone(lbl);
+            lbl.placement = structuredClone(session.origPlacement) as EdgeLabelPlacement;
+            this.engine.execute({
+              type: 'label.upsert',
+              targetKind: 'edge',
+              targetId: edge.id,
+              label: finalLabel,
+            });
+          }
+        }
+        break;
+      }
     }
   };
 
@@ -904,6 +1061,15 @@ export class InteractionController {
         this.engine.execute({ type: 'edge.update', id: edge.id, patch: { bends: nextBends } });
         return;
       }
+    }
+
+    // 1b. Double-click label handle => edit label inline directly
+    const labelEl = target?.closest('[data-label-id]') as Element | null;
+    const labelTargetId = labelEl?.getAttribute('data-label-target-id');
+    const labelKind = labelEl?.getAttribute('data-label-kind') as 'node' | 'edge' | null;
+    if (labelTargetId && labelKind) {
+      this.openInlineLabelEditor(labelKind, labelTargetId);
+      return;
     }
 
     // 2. Double-click node => edit label

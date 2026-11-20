@@ -13,7 +13,6 @@ import {
   type NodeAlignment,
   type NodeDistribution,
   type NodeLabelPlacement,
-  type NodeLabelPosition,
   type NodeMatchSize,
   type NodePatch,
   type SelectionState,
@@ -64,18 +63,6 @@ const ROUTING_OPTIONS = [
   { value: 'orthogonal', label: 'Orthogonal' },
   { value: 'straight', label: 'Straight' },
   { value: 'bezier', label: 'Bezier' },
-];
-
-const NODE_LABEL_POS_OPTIONS: Array<{ value: NodeLabelPosition; label: string }> = [
-  { value: 'center', label: 'Center' },
-  { value: 'top', label: 'Top' },
-  { value: 'bottom', label: 'Bottom' },
-  { value: 'left', label: 'Left' },
-  { value: 'right', label: 'Right' },
-  { value: 'top-left', label: 'Top Left' },
-  { value: 'top-right', label: 'Top Right' },
-  { value: 'bottom-left', label: 'Bottom Left' },
-  { value: 'bottom-right', label: 'Bottom Right' },
 ];
 
 const FONT_WEIGHT_OPTIONS = [
@@ -353,7 +340,8 @@ export function PropertiesPanel({
           <div className="diagrav-shortcuts-list">
             <div>Drag shapes from Palette or click to insert.</div>
             <div>Hover a node and drag any blue port to connect.</div>
-            <div>Drag a selected edge to add bends; double-click a bend to remove.</div>
+            <div>Select any node or edge and drag its label directly to reposition.</div>
+            <div>Double-click or press F2 to edit labels inline.</div>
             <div>Shift+drag empty canvas to box-select &amp; align/distribute nodes.</div>
           </div>
           <Separator />
@@ -715,77 +703,10 @@ export function PropertiesPanel({
               </div>
 
               <Separator />
-              <div className="diagrav-section-title">Label Style &amp; Placement</div>
-              <div className="diagrav-prop-grid-2">
-                <Field label="Model">
-                  <Select
-                    size="sm"
-                    disabled={readOnly}
-                    value={primaryLabel.placement.model}
-                    onValueChange={(v) =>
-                      updatePrimaryLabel({
-                        placement: { model: v as NodeLabelPlacement['model'] },
-                      })
-                    }
-                    options={[
-                      { value: 'internal', label: 'Internal' },
-                      { value: 'external', label: 'External' },
-                      { value: 'free', label: 'Free' },
-                    ]}
-                  />
-                </Field>
-                {primaryLabel.placement.model !== 'free' && (
-                  <Field label="Position">
-                    <Select
-                      size="sm"
-                      disabled={readOnly}
-                      value={primaryLabel.placement.position}
-                      onValueChange={(v) =>
-                        updatePrimaryLabel({
-                          placement: { position: v as NodeLabelPosition },
-                        })
-                      }
-                      options={NODE_LABEL_POS_OPTIONS}
-                    />
-                  </Field>
-                )}
+              <div className="diagrav-section-title">Label Typography</div>
+              <div style={{ fontSize: 11.5, color: 'var(--j-fg-muted, #64748b)' }}>
+                Drag the label directly on the canvas to reposition, or double-click to edit.
               </div>
-
-              {primaryLabel.placement.model === 'free' && (
-                <div className="diagrav-prop-grid-2">
-                  <Field label="Offset X">
-                    <NumberInput
-                      size="sm"
-                      disabled={readOnly}
-                      value={Math.round(primaryLabel.placement.offset?.x ?? 0)}
-                      onValueChange={(v) =>
-                        v !== null &&
-                        updatePrimaryLabel({
-                          placement: {
-                            offset: { x: v, y: primaryLabel.placement.offset?.y ?? 0 },
-                          },
-                        })
-                      }
-                    />
-                  </Field>
-                  <Field label="Offset Y">
-                    <NumberInput
-                      size="sm"
-                      disabled={readOnly}
-                      value={Math.round(primaryLabel.placement.offset?.y ?? 0)}
-                      onValueChange={(v) =>
-                        v !== null &&
-                        updatePrimaryLabel({
-                          placement: {
-                            offset: { x: primaryLabel.placement.offset?.x ?? 0, y: v },
-                          },
-                        })
-                      }
-                    />
-                  </Field>
-                </div>
-              )}
-
               <div className="diagrav-prop-grid-2">
                 <Field label="Font Size">
                   <NumberInput
@@ -957,59 +878,10 @@ export function PropertiesPanel({
             </div>
 
             <Separator />
-            <div className="diagrav-section-title">Label Style &amp; Placement</div>
-            <div className="diagrav-prop-grid-2">
-              <Field label="Placement">
-                <Select
-                  size="sm"
-                  disabled={readOnly}
-                  value={edgeLabel.placement.model}
-                  onValueChange={(v) =>
-                    updateEdgeLabel({
-                      placement: { model: v as EdgeLabelPlacement['model'] },
-                    })
-                  }
-                  options={[
-                    { value: 'center', label: 'Center' },
-                    { value: 'source', label: 'Source' },
-                    { value: 'target', label: 'Target' },
-                    { value: 'ratio', label: 'Ratio' },
-                    { value: 'free', label: 'Free' },
-                  ]}
-                />
-              </Field>
-              <Field label="Distance">
-                <NumberInput
-                  size="sm"
-                  min={-60}
-                  max={60}
-                  step={2}
-                  disabled={readOnly}
-                  value={edgeLabel.placement.distance ?? -10}
-                  onValueChange={(v) =>
-                    v !== null && updateEdgeLabel({ placement: { distance: v } })
-                  }
-                />
-              </Field>
+            <div className="diagrav-section-title">Label Typography</div>
+            <div style={{ fontSize: 11.5, color: 'var(--j-fg-muted, #64748b)' }}>
+              Drag the edge label directly on the canvas to slide or offset it.
             </div>
-
-            {edgeLabel.placement.model === 'ratio' && (
-              <Field label="Ratio (0–1)">
-                <NumberInput
-                  size="sm"
-                  min={0}
-                  max={1}
-                  step={0.05}
-                  disabled={readOnly}
-                  value={edgeLabel.placement.ratio ?? 0.5}
-                  onValueChange={(v) =>
-                    v !== null &&
-                    updateEdgeLabel({ placement: { ratio: Math.max(0, Math.min(1, v)) } })
-                  }
-                />
-              </Field>
-            )}
-
             <div className="diagrav-prop-grid-2">
               <Field label="Font Size">
                 <NumberInput

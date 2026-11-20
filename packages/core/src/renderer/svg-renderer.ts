@@ -45,6 +45,7 @@ export interface RenderState {
   snapLines: AlignGuide[];
   spacingGuides: SpacingGuide[];
   marqueeRect: RectBox | null;
+  draggingLabel: { kind: 'node' | 'edge'; targetId: string; labelId: string; from: Point; to: Point } | null;
   /** Internal flag used during standalone SVG export to omit interactive hit paths. */
   exportMode?: boolean;
 }
@@ -453,6 +454,47 @@ export class SvgRenderer {
       const pos = computeNodeLabelPosition(node, label);
       const localX = pos.x - x;
       const localY = pos.y - y;
+      const lines = label.text.split('\n');
+      const maxLen = Math.max(...lines.map((l) => l.length));
+      const pad = 4 * invZoom;
+      const estW = Math.max(28, maxLen * label.style.fontSize * 0.62) + pad * 2;
+      const estH = lines.length * label.style.fontSize * 1.25 + pad * 2;
+
+      // Interactive drag-to-place label handle when node is selected in editor mode
+      if (state.mode === 'editor' && !state.exportMode && isSelected) {
+        const boxX =
+          pos.textAnchor === 'start'
+            ? localX - pad
+            : pos.textAnchor === 'end'
+              ? localX - estW + pad
+              : localX - estW / 2;
+        const boxY =
+          pos.dominantBaseline === 'hanging'
+            ? localY - pad
+            : pos.dominantBaseline === 'auto'
+              ? localY - estH + pad
+              : localY - estH / 2;
+        const isDraggingThis = state.draggingLabel?.labelId === label.id;
+        g.appendChild(
+          el('rect', {
+            class: 'diagrav-label-handle',
+            'data-label-kind': 'node',
+            'data-label-target-id': node.id,
+            'data-label-id': label.id,
+            x: boxX,
+            y: boxY,
+            width: estW,
+            height: estH,
+            rx: 4 * invZoom,
+            fill: isDraggingThis ? 'rgba(37, 99, 235, 0.12)' : 'rgba(37, 99, 235, 0.04)',
+            stroke: '#2563eb',
+            'stroke-width': 1 * invZoom,
+            'stroke-dasharray': `${3 * invZoom} ${2 * invZoom}`,
+            cursor: isDraggingThis ? 'grabbing' : 'grab',
+          }),
+        );
+      }
+
       const textEl = this.renderMultilineText(
         label.text,
         localX,
@@ -536,15 +578,25 @@ export class SvgRenderer {
       const approxH = lines.length * label.style.fontSize * 1.25 + pad * 2;
 
       let bgRect: SVGRectElement | null = null;
-      if (label.style.background) {
+      const showLabelHandle = state.mode === 'editor' && !state.exportMode && isSelected;
+      const isDraggingThis = state.draggingLabel?.labelId === label.id;
+      if (label.style.background || showLabelHandle) {
         bgRect = el('rect', {
+          class: showLabelHandle ? 'diagrav-label-handle' : undefined,
+          'data-label-kind': showLabelHandle ? 'edge' : undefined,
+          'data-label-target-id': showLabelHandle ? edge.id : undefined,
+          'data-label-id': showLabelHandle ? label.id : undefined,
           x: pos.x - approxW / 2,
           y: pos.y - approxH / 2,
           width: approxW,
           height: approxH,
           rx: 4,
-          fill: label.style.background,
-          'pointer-events': 'none',
+          fill: label.style.background ?? (isDraggingThis ? 'rgba(37, 99, 235, 0.12)' : 'rgba(37, 99, 235, 0.05)'),
+          stroke: showLabelHandle ? '#2563eb' : undefined,
+          'stroke-width': showLabelHandle ? 1 * invZoom : undefined,
+          'stroke-dasharray': showLabelHandle ? `${3 * invZoom} ${2 * invZoom}` : undefined,
+          cursor: showLabelHandle ? (isDraggingThis ? 'grabbing' : 'grab') : undefined,
+          'pointer-events': showLabelHandle ? 'all' : 'none',
         });
         g.appendChild(bgRect);
       }
@@ -791,6 +843,22 @@ export class SvgRenderer {
       );
     }
 
+    // 4. Label tether line while dragging a label on canvas
+    if (state.draggingLabel) {
+      this.overlayLayer.appendChild(
+        el('line', {
+          x1: state.draggingLabel.from.x,
+          y1: state.draggingLabel.from.y,
+          x2: state.draggingLabel.to.x,
+          y2: state.draggingLabel.to.y,
+          stroke: '#2563eb',
+          'stroke-width': 1 * invZoom,
+          'stroke-dasharray': `${3 * invZoom} ${3 * invZoom}`,
+          'pointer-events': 'none',
+        }),
+      );
+    }
+
     // Resize handles for single selected node (zoom-invariant size)
     if (state.selectedNodeIds.size === 1) {
       const id = Array.from(state.selectedNodeIds)[0];
@@ -878,6 +946,7 @@ export class SvgRenderer {
       snapLines: [],
       spacingGuides: [],
       marqueeRect: null,
+      draggingLabel: null,
       exportMode: true,
     });
 

@@ -16,6 +16,8 @@ import {
   createEmptyDocument,
   createMatchSizeCommand,
   exportDocumentToSvg,
+  resolveEdgeLabelDrop,
+  resolveNodeLabelDrop,
   serializeMetadataJson,
   validateDocument,
 } from '../index.js';
@@ -294,4 +296,31 @@ test('exportDocumentToSvg renders standalone XML-safe SVG in Node.js without DOM
   assert.ok(svg.includes('Service B'));
   assert.ok(svg.includes('data-edge-id="e1"'));
   assert.ok(!svg.includes('<SVG>')); // properly XML-escaped
+});
+
+test('resolveNodeLabelDrop and resolveEdgeLabelDrop support direct canvas label dragging', () => {
+  const node = createDefaultNode({ id: 'n1', geometry: { x: 100, y: 100, width: 120, height: 60 } });
+  const lbl = createDefaultNodeLabel('Hello');
+
+  // Near external bottom slot (x=160, y=164) -> snaps to external/bottom
+  const snapped = resolveNodeLabelDrop(node, lbl, { x: 162, y: 165 }, 10);
+  assert.equal(snapped.model, 'external');
+  assert.equal(snapped.position, 'bottom');
+
+  // Far away -> switches to free offset relative to node center (160, 130)
+  const free = resolveNodeLabelDrop(node, lbl, { x: 250, y: 200 }, 10);
+  assert.equal(free.model, 'free');
+  assert.deepEqual(free.offset, { x: 90, y: 70 });
+
+  // Edge label dragged to 75% along horizontal edge, 16px above
+  const edgePlacement = resolveEdgeLabelDrop(
+    [
+      { x: 0, y: 100 },
+      { x: 200, y: 100 },
+    ],
+    { x: 150, y: 84 },
+  );
+  assert.equal(edgePlacement.model, 'ratio');
+  assert.equal(edgePlacement.ratio, 0.75);
+  assert.equal(edgePlacement.distance, -16);
 });
