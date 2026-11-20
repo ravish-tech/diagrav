@@ -194,6 +194,7 @@ export class InteractionController {
     this.closeInlineEditor(false);
     const svg = this.renderer.svg;
     svg.removeEventListener('pointerdown', this.onPointerDown);
+    svg.removeEventListener('selectstart', this.onSelectStart);
     window.removeEventListener('pointermove', this.onPointerMove);
     window.removeEventListener('pointerup', this.onPointerUp);
     window.removeEventListener('pointercancel', this.onPointerCancel);
@@ -206,6 +207,7 @@ export class InteractionController {
   private bindEvents(): void {
     const svg = this.renderer.svg;
     svg.addEventListener('pointerdown', this.onPointerDown);
+    svg.addEventListener('selectstart', this.onSelectStart);
     window.addEventListener('pointermove', this.onPointerMove);
     window.addEventListener('pointerup', this.onPointerUp);
     window.addEventListener('pointercancel', this.onPointerCancel);
@@ -214,6 +216,10 @@ export class InteractionController {
     svg.addEventListener('dblclick', this.onDoubleClick);
     window.addEventListener('keydown', this.onKeyDown);
   }
+
+  private onSelectStart = (e: Event): void => {
+    e.preventDefault();
+  };
 
   private redraw(): void {
     this.renderer.render(this.engine.getDocument(), this.getRenderState());
@@ -316,6 +322,8 @@ export class InteractionController {
 
   private onPointerDown = (e: PointerEvent): void => {
     if (e.button !== 0 && e.button !== 1) return;
+    // Prevent native browser text selection when clicking, dragging, or double-clicking shapes
+    e.preventDefault();
     this.closeInlineEditor(true);
     this.renderer.svg.focus({ preventScroll: true });
 

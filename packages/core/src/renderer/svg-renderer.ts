@@ -78,6 +78,7 @@ export class SvgRenderer {
     this.svg.style.width = '100%';
     this.svg.style.height = '100%';
     this.svg.style.userSelect = 'none';
+    (this.svg.style as CSSStyleDeclaration & { webkitUserSelect?: string }).webkitUserSelect = 'none';
     this.svg.style.touchAction = 'none';
     this.svg.style.outline = 'none';
 
@@ -340,7 +341,12 @@ export class SvgRenderer {
     attrs: Record<string, string | number | undefined>,
   ): SVGTextElement {
     const lines = text.split('\n');
-    const textEl = el('text', { x, y, ...attrs });
+    const textEl = el('text', {
+      x,
+      y,
+      style: 'user-select: none; -webkit-user-select: none;',
+      ...attrs,
+    });
     if (lines.length === 1) {
       textEl.textContent = text;
       return textEl;

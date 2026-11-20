@@ -32,6 +32,9 @@ export interface ToolbarProps {
   onExportJson: () => void;
   onExportSvg: () => void;
   onImportJson: () => void;
+  notesOpen: boolean;
+  hasNotes: boolean;
+  onToggleNotes: () => void;
 }
 
 export function Toolbar({
@@ -53,6 +56,9 @@ export function Toolbar({
   onExportJson,
   onExportSvg,
   onImportJson,
+  notesOpen,
+  hasNotes,
+  onToggleNotes,
 }: ToolbarProps) {
   const sampleOptions = [
     ...samples.map((s) => ({ value: s.id, label: s.name })),
@@ -137,6 +143,16 @@ export function Toolbar({
               <Tooltip content="Fit diagram to viewport">
                 <Button size="sm" variant="ghost" onClick={onFitView}>
                   Fit
+                </Button>
+              </Tooltip>
+              <Tooltip content="Toggle Review Notes dock (auto-saved to docs/REVIEW_NOTES.md)">
+                <Button
+                  size="sm"
+                  variant={notesOpen ? 'soft' : 'ghost'}
+                  aria-pressed={notesOpen}
+                  onClick={onToggleNotes}
+                >
+                  Notes{hasNotes ? ' •' : ''}
                 </Button>
               </Tooltip>
             </>

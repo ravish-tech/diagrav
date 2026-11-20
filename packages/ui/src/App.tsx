@@ -13,6 +13,7 @@ import {
 import { AppShell, Toaster, toast } from 'jenni-react';
 import { useEffect, useRef, useState } from 'react';
 import { EmbedDemo } from './components/EmbedDemo';
+import { NotesDock } from './components/NotesDock';
 import { PalettePanel } from './components/PalettePanel';
 import { PropertiesPanel } from './components/PropertiesPanel';
 import { Toolbar, type AppViewMode } from './components/Toolbar';
@@ -41,6 +42,14 @@ export function App() {
   const [viewMode, setViewMode] = useState<AppViewMode>('editor');
   const [tool, setTool] = useState<EditorTool>('select');
   const [showGrid, setShowGrid] = useState(true);
+  const [notesOpen, setNotesOpen] = useState(false);
+  const [hasNotes, setHasNotes] = useState(() => {
+    try {
+      return Boolean(localStorage.getItem('diagrav.reviewNotes')?.trim());
+    } catch {
+      return false;
+    }
+  });
   const [history, setHistory] = useState({ canUndo: false, canRedo: false });
   const [shapes, setShapes] = useState<ShapeDefinition[]>([]);
 
@@ -216,8 +225,12 @@ export function App() {
         height="100vh"
         asideWidth={210}
         asideLabel="Palette"
+        dockHeight={200}
+        dockLabel="Review Notes"
         sidebarOpen={!isEmbed}
         asideOpen={!isEmbed}
+        dockOpen={!isEmbed && notesOpen}
+        onDockOpenChange={setNotesOpen}
         topbar={
           <Toolbar
             viewMode={viewMode}
@@ -238,6 +251,9 @@ export function App() {
             onExportJson={handleExportJson}
             onExportSvg={handleExportSvg}
             onImportJson={() => fileInputRef.current?.click()}
+            notesOpen={notesOpen}
+            hasNotes={hasNotes}
+            onToggleNotes={() => setNotesOpen((v) => !v)}
           />
         }
         sidebar={
@@ -261,6 +277,14 @@ export function App() {
               shapes={shapes}
               disabled={viewMode === 'readonly'}
               onAddShape={(s) => handleAddShape(s)}
+            />
+          ) : undefined
+        }
+        dock={
+          !isEmbed ? (
+            <NotesDock
+              onClose={() => setNotesOpen(false)}
+              onHasContentChange={setHasNotes}
             />
           ) : undefined
         }

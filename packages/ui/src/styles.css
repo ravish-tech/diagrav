@@ -13,6 +13,15 @@ body,
   min-height: 0;
   background: var(--j-bg, #f8fafc);
   overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.diagrav-svg,
+.diagrav-svg text,
+.diagrav-svg tspan {
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .diagrav-panel {
@@ -105,4 +114,28 @@ body,
   width: 100%;
   font-size: 12px;
   color: var(--j-fg-muted, #64748b);
+}
+
+.diagrav-notes-dock {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--j-surface-1, #ffffff);
+  border-top: 1px solid var(--j-border, #e2e8f0);
+}
+
+.diagrav-notes-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--j-border, #e2e8f0);
+  background: var(--j-surface-2, #f8fafc);
+}
+
+.diagrav-notes-body {
+  flex: 1;
+  min-height: 0;
+  padding: 8px 12px 10px;
 }
