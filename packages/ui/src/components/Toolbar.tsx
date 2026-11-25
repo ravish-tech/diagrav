@@ -1,4 +1,4 @@
-import type { EditorTool } from '@diagrav/core';
+import type { AutoLayoutAlgorithm, EditorTool } from '@diagrav/core';
 import {
   Badge,
   Button,
@@ -35,7 +35,9 @@ export interface ToolbarProps {
   onFitView: () => void;
   onViewJson: () => void;
   onExportSvg: () => void;
+  onExportGraphMl: () => void;
   onImportJson: () => void;
+  onAutoLayout: (algorithm: AutoLayoutAlgorithm) => void;
   panelStates: Record<string, PanelState>;
   hasNotes: boolean;
   onTogglePanel: (panelId: string) => void;
@@ -60,7 +62,9 @@ export function Toolbar({
   onFitView,
   onViewJson,
   onExportSvg,
+  onExportGraphMl,
   onImportJson,
+  onAutoLayout,
   panelStates,
   hasNotes,
   onTogglePanel,
@@ -153,6 +157,24 @@ export function Toolbar({
                   Fit
                 </Button>
               </Tooltip>
+              {viewMode === 'editor' && (
+                <DropdownMenu
+                  align="end"
+                  trigger={
+                    <Button size="sm" variant="ghost">
+                      Layout ▾
+                    </Button>
+                  }
+                >
+                  <DropdownItem onClick={() => onAutoLayout('hierarchical-lr')}>
+                    Hierarchical (Left → Right)
+                  </DropdownItem>
+                  <DropdownItem onClick={() => onAutoLayout('hierarchical-tb')}>
+                    Hierarchical (Top → Bottom)
+                  </DropdownItem>
+                  <DropdownItem onClick={() => onAutoLayout('grid')}>Compact Grid</DropdownItem>
+                </DropdownMenu>
+              )}
               <DropdownMenu
                 align="end"
                 trigger={
@@ -174,6 +196,20 @@ export function Toolbar({
                   onClick={() => onTogglePanel('palette')}
                 >
                   Palette
+                </DropdownItem>
+                <DropdownItem
+                  role="menuitemcheckbox"
+                  checked={Boolean(panelStates.overview?.open)}
+                  onClick={() => onTogglePanel('overview')}
+                >
+                  Overview Minimap
+                </DropdownItem>
+                <DropdownItem
+                  role="menuitemcheckbox"
+                  checked={Boolean(panelStates.structure?.open)}
+                  onClick={() => onTogglePanel('structure')}
+                >
+                  Structure Tree
                 </DropdownItem>
                 <DropdownItem
                   role="menuitemcheckbox"
@@ -202,9 +238,19 @@ export function Toolbar({
                 View JSON
               </Button>
             </Tooltip>
-            <Button size="sm" variant="solid" onClick={onExportSvg}>
-              Export SVG
-            </Button>
+            <DropdownMenu
+              align="end"
+              trigger={
+                <Button size="sm" variant="solid">
+                  Export ▾
+                </Button>
+              }
+            >
+              <DropdownItem onClick={onExportSvg}>Export SVG (.svg)</DropdownItem>
+              <DropdownItem onClick={onExportGraphMl}>Export GraphML (.graphml)</DropdownItem>
+              <DropdownSeparator />
+              <DropdownItem onClick={onViewJson}>View / Save JSON (.diagrav.json)</DropdownItem>
+            </DropdownMenu>
           </Inline>
         ) : (
           <Button size="sm" variant="solid" onClick={() => onViewModeChange('editor')}>

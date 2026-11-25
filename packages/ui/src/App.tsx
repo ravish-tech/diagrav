@@ -2,7 +2,10 @@ import {
   Diagrav,
   createDefaultNode,
   createDefaultNodeLabel,
+  exportDocumentToGraphMl,
+  importGraphMlToDocument,
   validateDocument,
+  type AutoLayoutAlgorithm,
   type ContextMenuEvent,
   type DiagramCommand,
   type DiagramDocument,
@@ -18,8 +21,10 @@ import { DockWorkspace, type DockPanelConfig, type PanelState } from './componen
 import { EmbedDemo } from './components/EmbedDemo';
 import { JsonViewerModal } from './components/JsonViewerModal';
 import { NotesDock } from './components/NotesDock';
+import { OverviewPanel } from './components/OverviewPanel';
 import { PalettePanel } from './components/PalettePanel';
 import { PropertiesPanel } from './components/PropertiesPanel';
+import { StructurePanel } from './components/StructurePanel';
 import { Toolbar, type AppViewMode } from './components/Toolbar';
 import { useAiBridge } from './hooks/useAiBridge';
 import { SAMPLES } from './samples';
@@ -66,6 +71,32 @@ function createDefaultPanelStates(): Record<string, PanelState> {
       width: 300,
       height: 240,
       zIndex: 12,
+    },
+    overview: {
+      id: 'overview',
+      open: false,
+      mode: 'docked',
+      side: 'left',
+      order: 1,
+      collapsed: false,
+      x: 24,
+      y: 420,
+      width: 240,
+      height: 180,
+      zIndex: 13,
+    },
+    structure: {
+      id: 'structure',
+      open: false,
+      mode: 'docked',
+      side: 'left',
+      order: 2,
+      collapsed: false,
+      x: 24,
+      y: 280,
+      width: 264,
+      height: 300,
+      zIndex: 14,
     },
   };
 }
@@ -123,7 +154,21 @@ export function App() {
   const [history, setHistory] = useState({ canUndo: false, canRedo: false });
   const [shapes, setShapes] = useState<ShapeDefinition[]>([]);
   const [contextMenu, setContextMenu] = useState<ContextMenuEvent | null>(null);
+  const [canvasSize, setCanvasSize] = useState({ width: 900, height: 640 });
   const aiBridge = useAiBridge(diagravRef, doc);
+
+  useEffect(() => {
+    const el = hostRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver((entries) => {
+      const r = entries[0]?.contentRect;
+      if (r && r.width > 0 && r.height > 0) {
+        setCanvasSize({ width: Math.round(r.width), height: Math.round(r.height) });
+      }
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   useEffect(() => {
     if (!contextMenu) return;
@@ -312,18 +357,39 @@ export function App() {
     toast.success('Exported diagram.svg');
   };
 
+  const handleExportGraphMl = () => {
+    const current = diagravRef.current?.getDocument();
+    if (!current) return;
+    downloadText('diagram.graphml', exportDocumentToGraphMl(current), 'application/xml');
+    toast.success('Exported diagram.graphml (yEd compatible)');
+  };
+
+  const handleAutoLayout = (algorithm: AutoLayoutAlgorithm) => {
+    if (viewMode !== 'editor') return;
+    if (diagravRef.current?.autoLayout(algorithm)) {
+      requestAnimationFrame(() => diagravRef.current?.fitToView(48));
+      toast.success(`Applied ${algorithm} layout`);
+    }
+  };
+
   const handleImportFile = async (file: File) => {
     if (viewMode !== 'editor') return;
     try {
       const text = await file.text();
-      const parsed = validateDocument(JSON.parse(text));
+      const isGraphMl =
+        file.name.toLowerCase().endsWith('.graphml') ||
+        file.name.toLowerCase().endsWith('.xml') ||
+        text.trimStart().startsWith('<');
+      const parsed = isGraphMl
+        ? importGraphMlToDocument(text, file.name.replace(/\.(graphml|xml)$/i, ''))
+        : validateDocument(JSON.parse(text));
       diagravRef.current?.loadDocument(parsed);
       setActiveSampleId('custom');
       setCustomTitle(parsed.meta.title || file.name);
       requestAnimationFrame(() => diagravRef.current?.fitToView(48));
       toast.success(`Loaded ${file.name}`);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Invalid .diagrav.json file';
+      const msg = err instanceof Error ? err.message : 'Invalid diagram file';
       toast.error(`Failed to open file: ${msg}`);
     }
   };
@@ -379,6 +445,41 @@ export function App() {
           title: 'Review Notes',
           render: () => <NotesDock onHasContentChange={setHasNotes} />,
         },
+        {
+          id: 'overview',
+          title: 'Overview',
+          render: () => (
+            <OverviewPanel
+              doc={doc}
+              canvasSize={canvasSize}
+              onCenterOnWorld={(pt) => diagravRef.current?.centerOnPoint(pt)}
+            />
+          ),
+        },
+        {
+          id: 'structure',
+          title: 'Structure',
+          render: () => (
+            <StructurePanel
+              doc={doc}
+              shapes={shapes}
+              selection={selection}
+              onSelectNode={(id) => {
+                diagravRef.current?.interaction.selectNodes([id]);
+                const n = diagravRef.current?.engine.getNode(id);
+                if (n) {
+                  diagravRef.current?.centerOnPoint({
+                    x: n.geometry.x + n.geometry.width / 2,
+                    y: n.geometry.y + n.geometry.height / 2,
+                  });
+                }
+              }}
+              onSelectEdge={(id) => {
+                diagravRef.current?.interaction.selectEdges([id]);
+              }}
+            />
+          ),
+        },
       ];
 
   return (
@@ -386,7 +487,7 @@ export function App() {
       <input
         ref={fileInputRef}
         type="file"
-        accept=".json,.diagrav.json"
+        accept=".json,.diagrav.json,.graphml,.xml"
         style={{ display: 'none' }}
         onChange={(e) => {
           const f = e.target.files?.[0];
@@ -413,7 +514,9 @@ export function App() {
         onFitView={() => diagravRef.current?.fitToView(48)}
         onViewJson={() => setJsonOpen(true)}
         onExportSvg={handleExportSvg}
+        onExportGraphMl={handleExportGraphMl}
         onImportJson={() => fileInputRef.current?.click()}
+        onAutoLayout={handleAutoLayout}
         panelStates={panelStates}
         hasNotes={hasNotes}
         onTogglePanel={handleTogglePanel}

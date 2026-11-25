@@ -8,6 +8,7 @@ import {
   computeNodeLabelPosition,
   computeSmartSnap,
   createAlignNodesCommand,
+  createAutoLayoutCommand,
   createDefaultEdge,
   createDefaultEdgeLabel,
   createDefaultNode,
@@ -15,7 +16,9 @@ import {
   createDistributeNodesCommand,
   createEmptyDocument,
   createMatchSizeCommand,
+  exportDocumentToGraphMl,
   exportDocumentToSvg,
+  importGraphMlToDocument,
   resolveEdgeLabelDrop,
   resolveNodeLabelDrop,
   serializeMetadataJson,
@@ -323,4 +326,58 @@ test('resolveNodeLabelDrop and resolveEdgeLabelDrop support direct canvas label 
   assert.equal(edgePlacement.model, 'ratio');
   assert.equal(edgePlacement.ratio, 0.75);
   assert.equal(edgePlacement.distance, -16);
+});
+
+test('createAutoLayoutCommand arranges hierarchical-lr, hierarchical-tb, and grid layouts', () => {
+  const engine = new CommandEngine();
+  const n1 = createDefaultNode({ id: 'n1', labelText: 'A', geometry: { x: 400, y: 400 } });
+  const n2 = createDefaultNode({ id: 'n2', labelText: 'B', geometry: { x: 10, y: 10 } });
+  const n3 = createDefaultNode({ id: 'n3', labelText: 'C', geometry: { x: 10, y: 20 } });
+  engine.execute({
+    type: 'batch',
+    commands: [
+      { type: 'node.create', node: n1 },
+      { type: 'node.create', node: n2 },
+      { type: 'node.create', node: n3 },
+      { type: 'edge.create', edge: createDefaultEdge('n1', 'n2') },
+      { type: 'edge.create', edge: createDefaultEdge('n2', 'n3') },
+    ],
+  });
+
+  const lr = createAutoLayoutCommand(engine.getDocument(), 'hierarchical-lr');
+  assert.ok(lr);
+  engine.execute(lr);
+  assert.ok((engine.getNode('n1')?.geometry.x ?? 0) < (engine.getNode('n2')?.geometry.x ?? 0));
+  assert.ok((engine.getNode('n2')?.geometry.x ?? 0) < (engine.getNode('n3')?.geometry.x ?? 0));
+
+  const tb = createAutoLayoutCommand(engine.getDocument(), 'hierarchical-tb');
+  assert.ok(tb);
+  engine.execute(tb);
+  assert.ok((engine.getNode('n1')?.geometry.y ?? 0) < (engine.getNode('n2')?.geometry.y ?? 0));
+});
+
+test('GraphML adapter round-trips nodes, edges, bends, and labels', () => {
+  const doc = createEmptyDocument('RoundTripGraph');
+  doc.nodes.push(
+    createDefaultNode({ id: 'a', type: 'diamond', labelText: 'Check?', geometry: { x: 10, y: 20, width: 120, height: 80 } }),
+    createDefaultNode({ id: 'b', type: 'ellipse', labelText: 'Done', geometry: { x: 260, y: 20, width: 110, height: 60 } }),
+  );
+  doc.edges.push(
+    createDefaultEdge('a', 'b', {
+      id: 'e1',
+      bends: [{ x: 180, y: 90 }],
+      labels: [createDefaultEdgeLabel('Yes')],
+    }),
+  );
+
+  const xml = exportDocumentToGraphMl(doc);
+  assert.ok(xml.includes('<graphml') && xml.includes('y:ShapeNode') && xml.includes('Check?'));
+
+  const imported = importGraphMlToDocument(xml);
+  assert.equal(imported.meta.title, 'RoundTripGraph');
+  assert.equal(imported.nodes.length, 2);
+  assert.equal(imported.edges.length, 1);
+  assert.equal(imported.nodes[0].type, 'diamond');
+  assert.equal(imported.edges[0].bends.length, 1);
+  assert.equal(imported.edges[0].labels[0]?.text, 'Yes');
 });

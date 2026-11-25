@@ -3,6 +3,7 @@ import {
   EdgeRouterRegistry,
   ShapeRegistry,
   createAlignNodesCommand,
+  createAutoLayoutCommand,
   createDefaultEdge,
   createDefaultEdgeLabel,
   createDefaultNode,
@@ -10,9 +11,11 @@ import {
   createDistributeNodesCommand,
   createEmptyDocument,
   createMatchSizeCommand,
+  exportDocumentToGraphMl,
   exportDocumentToSvg,
   validateDocument,
   type ArrowType,
+  type AutoLayoutAlgorithm,
   type DiagramCommand,
   type DiagramDocument,
   type EdgePatch,
@@ -281,5 +284,22 @@ export class DiagravMcpSession {
       return { ok: true, filePath: resolved, bytes: Buffer.byteLength(svg, 'utf8') };
     }
     return { ok: true, svg };
+  }
+
+  autoLayout(algorithm: AutoLayoutAlgorithm) {
+    const cmd = createAutoLayoutCommand(this.engine.getDocument(), algorithm);
+    if (!cmd) return { ok: false, error: 'No nodes to lay out (or already laid out)' };
+    return this.runCommand(cmd);
+  }
+
+  exportGraphMl(filePath?: string) {
+    const xml = exportDocumentToGraphMl(this.engine.getDocument());
+    if (filePath) {
+      const resolved = path.resolve(filePath);
+      fs.mkdirSync(path.dirname(resolved), { recursive: true });
+      fs.writeFileSync(resolved, xml, 'utf8');
+      return { ok: true, filePath: resolved, bytes: Buffer.byteLength(xml, 'utf8') };
+    }
+    return { ok: true, graphml: xml };
   }
 }

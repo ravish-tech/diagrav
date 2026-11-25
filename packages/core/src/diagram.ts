@@ -13,6 +13,11 @@ import {
   type NodeDistribution,
   type NodeMatchSize,
 } from './layout/alignment.js';
+import {
+  createAutoLayoutCommand,
+  type AutoLayoutAlgorithm,
+  type AutoLayoutOptions,
+} from './layout/auto-layout.js';
 import { EdgeRouterRegistry } from './registries/edges.js';
 import { ShapeRegistry } from './registries/shapes.js';
 import {
@@ -160,6 +165,27 @@ export class Diagrav {
     );
     if (!cmd) return false;
     return this.engine.execute(cmd).ok;
+  }
+
+  autoLayout(algorithm: AutoLayoutAlgorithm, options?: AutoLayoutOptions): boolean {
+    const cmd = createAutoLayoutCommand(this.engine.getDocument(), algorithm, options);
+    if (!cmd) return false;
+    return this.engine.execute(cmd).ok;
+  }
+
+  centerOnPoint(worldPt: Point): void {
+    const rect = this.renderer.svg.getBoundingClientRect();
+    const doc = this.engine.getDocument();
+    const zoom = doc.viewport.zoom;
+    this.engine.execute({
+      type: 'viewport.set',
+      viewport: {
+        x: rect.width / 2 - worldPt.x * zoom,
+        y: rect.height / 2 - worldPt.y * zoom,
+        zoom,
+      },
+      recordHistory: false,
+    });
   }
 
   screenToWorld(clientX: number, clientY: number): Point {

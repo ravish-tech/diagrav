@@ -222,6 +222,24 @@ async function main() {
     async ({ filePath }) => jsonText(session.exportSvg(filePath)),
   );
 
+  server.tool(
+    'auto_layout',
+    'Automatically arrange diagram nodes using hierarchical-lr, hierarchical-tb, or grid layout.',
+    {
+      algorithm: z.enum(['hierarchical-lr', 'hierarchical-tb', 'grid']),
+    },
+    async ({ algorithm }) => jsonText(session.autoLayout(algorithm)),
+  );
+
+  server.tool(
+    'export_graphml',
+    'Export the current diagram as yEd-compatible GraphML XML (and optionally write to a .graphml file).',
+    {
+      filePath: z.string().optional().describe('Optional path to write the exported .graphml file'),
+    },
+    async ({ filePath }) => jsonText(session.exportGraphMl(filePath)),
+  );
+
   const transport = new StdioServerTransport();
   await server.connect(transport);
 

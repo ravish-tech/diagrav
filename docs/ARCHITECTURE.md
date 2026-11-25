@@ -46,7 +46,7 @@
 
 ## 5. Roadmap
 
-1. **Phase 1 (Done):** `@diagrav/core` JSON v1 schema, Command Bus + undo/redo, Shape/Edge/Label registries, SVG renderer (`readonly` & `editor`), headless SVG string exporter, smart alignment/spacing engine.
-2. **Phase 2 (Done):** `@diagrav/ui` Jenni UI studio, floating/dockable Left & Right panels (Properties, Palette, Review Notes), color-coded JSON viewer, 4 samples, Embed Demo, GitHub Actions CI & Pages.
-3. **Phase 3 (Done):** `@diagrav/mcp` stdio MCP server (19 tools) + live WebSocket bridge (`ws://127.0.0.1:4175`) for real-time Claude & Google agent control + headless `.diagrav.json`/SVG generation.
-4. **Phase 4 (Next):** Overview minimap panel, Structure tree panel, Grouping/nesting, GraphML adapter, Auto-layout, custom shape plugins.
+1. **Phase 1 (Done):** `@diagrav/core` JSON v1 schema, Command Bus + undo/redo, Shape/Edge/Label registries (34 shapes across 5 categories), SVG renderer (`readonly` & `editor`), headless SVG exporter, smart alignment/spacing engine.
+2. **Phase 2 (Done):** `@diagrav/ui` Jenni UI v0.2.0 studio, floating/dockable resizable Left & Right panels (Properties, Palette, Review Notes), color-coded JSON viewer, right-click context menu, 4 samples, Embed Demo, GitHub Actions CI & Pages.
+3. **Phase 3 (Done):** `@diagrav/mcp` stdio MCP server (21 tools) + live WebSocket bridge (`ws://127.0.0.1:4175`) for real-time Claude & Google agent control + headless `.diagrav.json`/SVG/GraphML generation.
+4. **Phase 4 (Done):** Auto-layout (`hierarchical-lr`, `hierarchical-tb`, `grid`), yEd-compatible GraphML import/export adapter, Overview minimap panel, Structure tree panel, and container child-drag grouping.

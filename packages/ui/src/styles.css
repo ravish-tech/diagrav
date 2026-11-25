@@ -396,6 +396,65 @@ body,
   background: var(--j-border, #e2e8f0);
 }
 
+.diagrav-overview-panel {
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+}
+
+.diagrav-overview-svg {
+  width: 100%;
+  height: 100%;
+  min-height: 120px;
+  border-radius: 6px;
+  border: 1px solid var(--j-border, #e2e8f0);
+  background: var(--j-bg, #f8fafc);
+  cursor: crosshair;
+}
+
+.diagrav-structure-panel {
+  padding: 8px 10px;
+}
+
+.diagrav-structure-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.diagrav-structure-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--j-fg, #1e293b);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.diagrav-structure-item:hover {
+  background: var(--j-surface-2, #f1f5f9);
+}
+
+.diagrav-structure-item.is-selected {
+  background: var(--j-accent-soft, #eff6ff);
+  border-color: var(--j-accent, #2563eb);
+  color: var(--j-accent-soft-fg, #1d4ed8);
+}
+
+.diagrav-structure-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
 .diagrav-palette-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
