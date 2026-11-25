@@ -4,6 +4,8 @@ export interface ShapeDefinition {
   type: string;
   label: string;
   category: string;
+  /** Optional search aliases (e.g. "db", "sql", "vpc", "k8s") for Palette search. */
+  keywords?: string[];
   defaultSize: { width: number; height: number };
   defaultBorderRadius?: number;
   defaultBorderDash?: number[];
@@ -403,6 +405,7 @@ export const BUILTIN_SHAPES: ShapeDefinition[] = [
     type: 'container-group',
     label: 'Group Box',
     category: 'Containers',
+    keywords: ['group', 'box', 'frame', 'cluster', 'subnet', 'vpc', 'boundary'],
     isContainer: true,
     defaultSize: { width: 320, height: 220 },
     defaultBorderRadius: 8,
@@ -420,6 +423,7 @@ export const BUILTIN_SHAPES: ShapeDefinition[] = [
     type: 'container-dashed',
     label: 'Dashed Zone',
     category: 'Containers',
+    keywords: ['dashed', 'zone', 'vpc', 'region', 'boundary', 'cluster', 'security'],
     isContainer: true,
     defaultSize: { width: 320, height: 220 },
     defaultBorderRadius: 10,
@@ -434,6 +438,7 @@ export const BUILTIN_SHAPES: ShapeDefinition[] = [
     type: 'container-swimlane-v',
     label: 'Swimlane V',
     category: 'Containers',
+    keywords: ['swimlane', 'lane', 'column', 'vertical', 'pool'],
     isContainer: true,
     defaultSize: { width: 220, height: 320 },
     defaultBorderRadius: 4,
@@ -451,6 +456,7 @@ export const BUILTIN_SHAPES: ShapeDefinition[] = [
     type: 'container-swimlane-h',
     label: 'Swimlane H',
     category: 'Containers',
+    keywords: ['swimlane', 'lane', 'row', 'horizontal', 'pool'],
     isContainer: true,
     defaultSize: { width: 420, height: 150 },
     defaultBorderRadius: 4,
@@ -468,6 +474,7 @@ export const BUILTIN_SHAPES: ShapeDefinition[] = [
     type: 'container-package',
     label: 'Package',
     category: 'Containers',
+    keywords: ['package', 'folder', 'module', 'namespace', 'uml'],
     isContainer: true,
     defaultSize: { width: 300, height: 200 },
     defaultFillColor: '#f8fafc',
@@ -490,6 +497,7 @@ export const BUILTIN_SHAPES: ShapeDefinition[] = [
     type: 'arch-database',
     label: 'Database',
     category: 'Architecture',
+    keywords: ['db', 'sql', 'postgres', 'mysql', 'storage', 'cylinder', 'store', 'cache', 'redis'],
     defaultSize: { width: 120, height: 84 },
     defaultFillColor: '#fff7ed',
     defaultBorderColor: '#ea580c',
@@ -509,17 +517,18 @@ export const BUILTIN_SHAPES: ShapeDefinition[] = [
     type: 'arch-cloud',
     label: 'Cloud',
     category: 'Architecture',
-    defaultSize: { width: 156, height: 88 },
+    keywords: ['cloud', 'aws', 'gcp', 'azure', 'internet', 'network', 'saas'],
+    defaultSize: { width: 156, height: 84 },
     defaultFillColor: '#f0f9ff',
     defaultBorderColor: '#0284c7',
     renderPath: (w, h) => {
       const s = (x: number, y: number) => `${(x * w).toFixed(1)} ${(y * h).toFixed(1)}`;
       return [
-        `M ${s(0.24, 0.88)}`,
-        `C ${s(0.06, 0.88)} ${s(0.02, 0.62)} ${s(0.14, 0.48)}`,
-        `C ${s(0.1, 0.24)} ${s(0.32, 0.08)} ${s(0.5, 0.18)}`,
-        `C ${s(0.64, 0.04)} ${s(0.9, 0.16)} ${s(0.86, 0.42)}`,
-        `C ${s(1.0, 0.5)} ${s(0.98, 0.88)} ${s(0.78, 0.88)}`,
+        `M ${s(0.22, 0.98)}`,
+        `C ${s(0.03, 0.98)} ${s(-0.02, 0.64)} ${s(0.11, 0.48)}`,
+        `C ${s(0.07, 0.2)} ${s(0.3, 0.02)} ${s(0.5, 0.12)}`,
+        `C ${s(0.66, -0.02)} ${s(0.93, 0.12)} ${s(0.89, 0.42)}`,
+        `C ${s(1.03, 0.52)} ${s(1.0, 0.98)} ${s(0.78, 0.98)}`,
         'Z',
       ].join(' ');
     },
@@ -529,6 +538,7 @@ export const BUILTIN_SHAPES: ShapeDefinition[] = [
     type: 'arch-queue',
     label: 'Queue',
     category: 'Architecture',
+    keywords: ['queue', 'kafka', 'pubsub', 'broker', 'mq', 'topic', 'stream', 'bus'],
     defaultSize: { width: 148, height: 56 },
     defaultFillColor: '#faf5ff',
     defaultBorderColor: '#9333ea',
@@ -548,6 +558,7 @@ export const BUILTIN_SHAPES: ShapeDefinition[] = [
     type: 'arch-server',
     label: 'Service',
     category: 'Architecture',
+    keywords: ['server', 'service', 'api', 'microservice', 'backend', 'worker', 'pod', 'k8s'],
     defaultSize: { width: 148, height: 72 },
     defaultBorderRadius: 6,
     defaultFillColor: '#f0fdf4',
@@ -563,6 +574,7 @@ export const BUILTIN_SHAPES: ShapeDefinition[] = [
     type: 'arch-actor',
     label: 'User / Actor',
     category: 'Architecture',
+    keywords: ['user', 'actor', 'person', 'client', 'customer', 'human'],
     defaultSize: { width: 96, height: 96 },
     defaultLabelPlacement: { model: 'external', position: 'bottom' },
     renderPath: (w, h) => {
@@ -584,6 +596,7 @@ export const BUILTIN_SHAPES: ShapeDefinition[] = [
     type: 'arch-note',
     label: 'Note',
     category: 'Architecture',
+    keywords: ['note', 'sticky', 'comment', 'annotation', 'memo'],
     defaultSize: { width: 148, height: 84 },
     defaultFillColor: '#fefce8',
     defaultBorderColor: '#ca8a04',
@@ -603,6 +616,7 @@ export const BUILTIN_SHAPES: ShapeDefinition[] = [
     type: 'uml-class',
     label: 'Class',
     category: 'UML',
+    keywords: ['class', 'entity', 'model', 'table', 'schema', 'struct'],
     defaultSize: { width: 164, height: 108 },
     defaultFillColor: '#ffffff',
     defaultBorderColor: '#334155',
@@ -619,6 +633,7 @@ export const BUILTIN_SHAPES: ShapeDefinition[] = [
     type: 'uml-component',
     label: 'Component',
     category: 'UML',
+    keywords: ['component', 'module', 'library', 'plugin'],
     defaultSize: { width: 156, height: 76 },
     defaultFillColor: '#f8fafc',
     defaultBorderColor: '#334155',
@@ -642,10 +657,12 @@ export const BUILTIN_SHAPES: ShapeDefinition[] = [
     type: 'uml-state',
     label: 'State',
     category: 'UML',
+    keywords: ['state', 'fsm', 'machine', 'lifecycle'],
     defaultSize: { width: 148, height: 72 },
     defaultBorderRadius: 14,
     defaultFillColor: '#f8fafc',
     defaultBorderColor: '#334155',
+    defaultLabelPlacement: { model: 'internal', position: 'top' },
     renderPath: (w, h, r) => roundedRectPath(w, h, r ?? 14),
     renderDecorations: (w, h) => {
       const hdr = Math.min(24, h * 0.34);

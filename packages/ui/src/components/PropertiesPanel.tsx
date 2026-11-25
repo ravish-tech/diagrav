@@ -42,6 +42,7 @@ export interface PropertiesPanelProps {
   shapes: ShapeDefinition[];
   readOnly: boolean;
   onUpdateNode: (id: string, patch: NodePatch, mergeKey?: string) => void;
+  onBatchUpdateNodes: (ids: string[], patch: NodePatch, mergeKey?: string) => void;
   onUpdateEdge: (id: string, patch: EdgePatch, mergeKey?: string) => void;
   onAlignNodes: (alignment: NodeAlignment) => void;
   onDistributeNodes: (mode: NodeDistribution) => void;
@@ -192,6 +193,7 @@ export function PropertiesPanel({
   shapes,
   readOnly,
   onUpdateNode,
+  onBatchUpdateNodes,
   onUpdateEdge,
   onAlignNodes,
   onDistributeNodes,
@@ -216,6 +218,36 @@ export function PropertiesPanel({
 
           {!readOnly && multiNodes >= 2 && (
             <>
+              <Separator />
+              <div className="diagrav-section-title">Batch Style</div>
+              <div className="diagrav-prop-grid-2">
+                <Field label="Fill">
+                  <ColorPicker
+                    size="sm"
+                    value="#f8fafc"
+                    onValueChange={(color) =>
+                      onBatchUpdateNodes(
+                        selection.nodeIds,
+                        { style: { fill: { type: 'solid', color, opacity: 1 } } },
+                        'batch-fill',
+                      )
+                    }
+                  />
+                </Field>
+                <Field label="Border">
+                  <ColorPicker
+                    size="sm"
+                    value="#475569"
+                    onValueChange={(color) =>
+                      onBatchUpdateNodes(
+                        selection.nodeIds,
+                        { style: { border: { color } } },
+                        'batch-border',
+                      )
+                    }
+                  />
+                </Field>
+              </div>
               <Separator />
               <div className="diagrav-section-title">Align</div>
               <div className="diagrav-align-grid-3">
@@ -345,10 +377,10 @@ export function PropertiesPanel({
           <div className="diagrav-section-title">Quick Guide</div>
           <div className="diagrav-shortcuts-list">
             <div>Drag shapes from Palette or click to insert.</div>
-            <div>Hover a node and drag any blue port to connect.</div>
-            <div>Select any node or edge and drag its label directly to reposition.</div>
-            <div>Double-click or press F2 to edit labels inline.</div>
-            <div>Shift+drag empty canvas to box-select &amp; align/distribute nodes.</div>
+            <div>Drag any outward blue port on a node to connect.</div>
+            <div>Drag empty canvas to box-select; hold Space+drag to pan.</div>
+            <div>Drag a node&apos;s blue label chip (or Alt+drag) to move its label; drag edge labels directly.</div>
+            <div>Double-click or press F2 to edit labels (Shift+Enter for new line).</div>
           </div>
           <Separator />
           <div className="diagrav-section-title">Shortcuts</div>
@@ -358,12 +390,20 @@ export function PropertiesPanel({
               <Kbd size="sm">F2</Kbd>
             </div>
             <div className="diagrav-shortcut-row">
-              <span>Undo / Redo</span>
-              <Kbd size="sm">⌘Z</Kbd>
+              <span>Copy / Paste</span>
+              <Kbd size="sm">⌘C / ⌘V</Kbd>
             </div>
             <div className="diagrav-shortcut-row">
               <span>Duplicate</span>
               <Kbd size="sm">⌘D</Kbd>
+            </div>
+            <div className="diagrav-shortcut-row">
+              <span>Undo / Redo</span>
+              <Kbd size="sm">⌘Z</Kbd>
+            </div>
+            <div className="diagrav-shortcut-row">
+              <span>Pan canvas</span>
+              <Kbd size="sm">Space+Drag</Kbd>
             </div>
             <div className="diagrav-shortcut-row">
               <span>Nudge</span>
@@ -460,9 +500,13 @@ export function PropertiesPanel({
       onUpdateNode(selectedNode.id, { labels: nextLabels }, mergeKey);
     };
 
+    const shapeLabel = shapes.find((s) => s.type === selectedNode.type)?.label ?? selectedNode.type;
+
     return (
       <div className="diagrav-panel">
         <Stack gap="related">
+          <div className="diagrav-section-title">Node · {shapeLabel}</div>
+
           {/* Simple / Everyday Controls */}
           <Field label="Label">
             <DebouncedTextInput
@@ -503,6 +547,31 @@ export function PropertiesPanel({
                     { style: { border: { color: c } } },
                     `node-border-color:${selectedNode.id}`,
                   )
+                }
+              />
+            </Field>
+          </div>
+
+          <div className="diagrav-prop-grid-2">
+            <Field label="Text Color">
+              <ColorPicker
+                size="sm"
+                disabled={readOnly}
+                value={primaryLabel.style.color}
+                onValueChange={(color) =>
+                  updatePrimaryLabel({ style: { color } }, `node-lbl-color:${selectedNode.id}`)
+                }
+              />
+            </Field>
+            <Field label="Font Size">
+              <NumberInput
+                size="sm"
+                min={8}
+                max={48}
+                disabled={readOnly}
+                value={primaryLabel.style.fontSize}
+                onValueChange={(v) =>
+                  v !== null && updatePrimaryLabel({ style: { fontSize: v } })
                 }
               />
             </Field>
@@ -711,40 +780,15 @@ export function PropertiesPanel({
               <Separator />
               <div className="diagrav-section-title">Label Typography</div>
               <div style={{ fontSize: 11.5, color: 'var(--j-fg-muted, #64748b)' }}>
-                Drag the label directly on the canvas to reposition, or double-click to edit.
+                Drag the blue label grip chip (or Alt+drag) to reposition, or double-click to edit.
               </div>
-              <div className="diagrav-prop-grid-2">
-                <Field label="Font Size">
-                  <NumberInput
-                    size="sm"
-                    min={8}
-                    max={48}
-                    disabled={readOnly}
-                    value={primaryLabel.style.fontSize}
-                    onValueChange={(v) =>
-                      v !== null && updatePrimaryLabel({ style: { fontSize: v } })
-                    }
-                  />
-                </Field>
-                <Field label="Weight">
-                  <Select
-                    size="sm"
-                    disabled={readOnly}
-                    value={String(primaryLabel.style.fontWeight ?? 500)}
-                    onValueChange={(v) => updatePrimaryLabel({ style: { fontWeight: Number(v) } })}
-                    options={FONT_WEIGHT_OPTIONS}
-                  />
-                </Field>
-              </div>
-
-              <Field label="Text Color">
-                <ColorPicker
+              <Field label="Font Weight">
+                <Select
                   size="sm"
                   disabled={readOnly}
-                  value={primaryLabel.style.color}
-                  onValueChange={(color) =>
-                    updatePrimaryLabel({ style: { color } }, `node-lbl-color:${selectedNode.id}`)
-                  }
+                  value={String(primaryLabel.style.fontWeight ?? 500)}
+                  onValueChange={(v) => updatePrimaryLabel({ style: { fontWeight: Number(v) } })}
+                  options={FONT_WEIGHT_OPTIONS}
                 />
               </Field>
             </Stack>
@@ -783,6 +827,8 @@ export function PropertiesPanel({
   return (
     <div className="diagrav-panel">
       <Stack gap="related">
+        <div className="diagrav-section-title">Connection · {edge.routing}</div>
+
         {/* Simple / Everyday Controls */}
         <Field label="Label">
           <DebouncedTextInput
@@ -827,6 +873,31 @@ export function PropertiesPanel({
           </Field>
         </div>
 
+        <div className="diagrav-prop-grid-2">
+          <Field label="Start Arrow">
+            <Select
+              size="sm"
+              disabled={readOnly}
+              value={edge.style.sourceArrow}
+              onValueChange={(v) =>
+                onUpdateEdge(edge.id, { style: { sourceArrow: v as ArrowType } })
+              }
+              options={ARROW_OPTIONS}
+            />
+          </Field>
+          <Field label="End Arrow">
+            <Select
+              size="sm"
+              disabled={readOnly}
+              value={edge.style.targetArrow}
+              onValueChange={(v) =>
+                onUpdateEdge(edge.id, { style: { targetArrow: v as ArrowType } })
+              }
+              options={ARROW_OPTIONS}
+            />
+          </Field>
+        </div>
+
         <Switch
           size="sm"
           label="Dashed line"
@@ -857,33 +928,6 @@ export function PropertiesPanel({
           onOpenChange={setShowAdvanced}
         >
           <Stack gap="related">
-            <div className="diagrav-section-title">Arrowheads</div>
-            <div className="diagrav-prop-grid-2">
-              <Field label="Source">
-                <Select
-                  size="sm"
-                  disabled={readOnly}
-                  value={edge.style.sourceArrow}
-                  onValueChange={(v) =>
-                    onUpdateEdge(edge.id, { style: { sourceArrow: v as ArrowType } })
-                  }
-                  options={ARROW_OPTIONS}
-                />
-              </Field>
-              <Field label="Target">
-                <Select
-                  size="sm"
-                  disabled={readOnly}
-                  value={edge.style.targetArrow}
-                  onValueChange={(v) =>
-                    onUpdateEdge(edge.id, { style: { targetArrow: v as ArrowType } })
-                  }
-                  options={ARROW_OPTIONS}
-                />
-              </Field>
-            </div>
-
-            <Separator />
             <div className="diagrav-section-title">Label Typography</div>
             <div style={{ fontSize: 11.5, color: 'var(--j-fg-muted, #64748b)' }}>
               Drag the edge label directly on the canvas to slide or offset it.

@@ -208,6 +208,15 @@ export class CommandEngine {
         return null;
       }
 
+      case 'node.reorder': {
+        const idx = draft.nodes.findIndex((n) => n.id === command.id);
+        if (idx === -1) return `Node not found: ${command.id}`;
+        const [node] = draft.nodes.splice(idx, 1);
+        if (command.position === 'front') draft.nodes.push(node);
+        else draft.nodes.unshift(node);
+        return null;
+      }
+
       case 'edge.create': {
         if (draft.edges.some((e) => e.id === command.edge.id)) {
           return `Edge already exists: ${command.edge.id}`;

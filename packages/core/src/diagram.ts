@@ -17,6 +17,7 @@ import { EdgeRouterRegistry } from './registries/edges.js';
 import { ShapeRegistry } from './registries/shapes.js';
 import {
   InteractionController,
+  type ContextMenuListener,
   type SelectionListener,
   type SelectionState,
 } from './renderer/interaction.js';
@@ -234,6 +235,38 @@ export class Diagrav {
 
   onSelectionChange(listener: SelectionListener): () => void {
     return this.interaction.onSelectionChange(listener);
+  }
+
+  onContextMenu(listener: ContextMenuListener): () => void {
+    return this.interaction.onContextMenu(listener);
+  }
+
+  zoomBy(factor: number): void {
+    this.interaction.zoomBy(factor);
+  }
+
+  setZoom(zoom: number): void {
+    this.interaction.setZoom(zoom);
+  }
+
+  bringToFront(nodeId: string): boolean {
+    return this.engine.execute({ type: 'node.reorder', id: nodeId, position: 'front' }).ok;
+  }
+
+  sendToBack(nodeId: string): boolean {
+    return this.engine.execute({ type: 'node.reorder', id: nodeId, position: 'back' }).ok;
+  }
+
+  copySelection(): boolean {
+    return this.interaction.copySelection();
+  }
+
+  pasteClipboard(): boolean {
+    return this.interaction.pasteClipboard();
+  }
+
+  duplicateSelection(): boolean {
+    return this.interaction.duplicateSelection();
   }
 
   destroy(): void {

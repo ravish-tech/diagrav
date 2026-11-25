@@ -359,7 +359,13 @@ export class SvgRenderer {
       return textEl;
     }
     const lineHeight = fontSize * 1.25;
-    const startOffset = -((lines.length - 1) * lineHeight) / 2;
+    const baseline = attrs['dominant-baseline'];
+    const startOffset =
+      baseline === 'hanging'
+        ? 0
+        : baseline === 'auto'
+          ? -(lines.length - 1) * lineHeight
+          : -((lines.length - 1) * lineHeight) / 2;
     lines.forEach((line, idx) => {
       const tspan = el('tspan', {
         x,
@@ -419,17 +425,22 @@ export class SvgRenderer {
       }
     }
 
-    // Subtle 4-side port handles on hover in editor mode (yEd-style edge drag start)
-    if (
+    // 4-side port handles offset outward by 12px so they NEVER collide with perimeter resize handles
+    // and remain usable on BOTH hovered and single-selected nodes!
+    const showPorts =
       state.mode === 'editor' &&
       !state.exportMode &&
-      (isHovered || state.draftEdge?.targetNodeId === node.id)
-    ) {
+      (isHovered ||
+        (isSelected && state.selectedNodeIds.size === 1) ||
+        state.draftEdge?.targetNodeId === node.id);
+
+    if (showPorts) {
+      const portOffset = 12 * invZoom;
       const ports: Array<{ id: string; cx: number; cy: number }> = [
-        { id: 'n', cx: width / 2, cy: 0 },
-        { id: 'e', cx: width, cy: height / 2 },
-        { id: 's', cx: width / 2, cy: height },
-        { id: 'w', cx: 0, cy: height / 2 },
+        { id: 'n', cx: width / 2, cy: -portOffset },
+        { id: 'e', cx: width + portOffset, cy: height / 2 },
+        { id: 's', cx: width / 2, cy: height + portOffset },
+        { id: 'w', cx: -portOffset, cy: height / 2 },
       ];
       for (const p of ports) {
         const portRing = el('circle', {
@@ -438,10 +449,10 @@ export class SvgRenderer {
           'data-port-side': p.id,
           cx: p.cx,
           cy: p.cy,
-          r: 5 * invZoom,
+          r: 4.5 * invZoom,
           fill: '#2563eb',
           stroke: '#ffffff',
-          'stroke-width': 2 * invZoom,
+          'stroke-width': 1.75 * invZoom,
           cursor: 'crosshair',
         });
         g.appendChild(portRing);
@@ -459,51 +470,68 @@ export class SvgRenderer {
       const pad = 4 * invZoom;
       const estW = Math.max(28, maxLen * label.style.fontSize * 0.62) + pad * 2;
       const estH = lines.length * label.style.fontSize * 1.25 + pad * 2;
+      const boxX =
+        pos.textAnchor === 'start'
+          ? localX - pad
+          : pos.textAnchor === 'end'
+            ? localX - estW + pad
+            : localX - estW / 2;
+      const boxY =
+        pos.dominantBaseline === 'hanging'
+          ? localY - pad
+          : pos.dominantBaseline === 'auto'
+            ? localY - estH + pad
+            : localY - estH / 2;
+      const isDraggingThis = state.draggingLabel?.labelId === label.id;
 
-      // Interactive drag-to-place label handle:
-      // Always active when node is selected OR when label is external/free (so moved labels stay directly grabbable!)
-      const showNodeLabelHandle =
-        state.mode === 'editor' &&
-        !state.exportMode &&
-        (isSelected || label.placement.model !== 'internal');
-
-      if (showNodeLabelHandle) {
-        const boxX =
-          pos.textAnchor === 'start'
-            ? localX - pad
-            : pos.textAnchor === 'end'
-              ? localX - estW + pad
-              : localX - estW / 2;
-        const boxY =
-          pos.dominantBaseline === 'hanging'
-            ? localY - pad
-            : pos.dominantBaseline === 'auto'
-              ? localY - estH + pad
-              : localY - estH / 2;
-        const isDraggingThis = state.draggingLabel?.labelId === label.id;
-        g.appendChild(
-          el('rect', {
-            class: 'diagrav-label-handle',
-            'data-label-kind': 'node',
-            'data-label-target-id': node.id,
-            'data-label-id': label.id,
-            x: boxX,
-            y: boxY,
-            width: estW,
-            height: estH,
-            rx: 4 * invZoom,
-            fill: isDraggingThis
-              ? 'rgba(37, 99, 235, 0.14)'
-              : isSelected
-                ? 'rgba(37, 99, 235, 0.06)'
-                : 'transparent',
-            stroke: isSelected ? '#2563eb' : 'transparent',
-            'stroke-width': 1 * invZoom,
-            'stroke-dasharray': isSelected ? `${3 * invZoom} ${2 * invZoom}` : undefined,
-            cursor: isDraggingThis ? 'grabbing' : 'grab',
-            'pointer-events': 'all',
-          }),
-        );
+      // External / free labels: full label pill is directly grabbable in 1 motion.
+      // Internal labels: NEVER hijack the center of the node! Render a small grip chip at top-right of the text.
+      if (state.mode === 'editor' && !state.exportMode) {
+        if (label.placement.model !== 'internal') {
+          g.appendChild(
+            el('rect', {
+              class: 'diagrav-label-handle',
+              'data-label-kind': 'node',
+              'data-label-target-id': node.id,
+              'data-label-id': label.id,
+              x: boxX,
+              y: boxY,
+              width: estW,
+              height: estH,
+              rx: 4 * invZoom,
+              fill: isDraggingThis
+                ? 'rgba(37, 99, 235, 0.14)'
+                : isSelected
+                  ? 'rgba(37, 99, 235, 0.06)'
+                  : 'transparent',
+              stroke: isSelected ? '#2563eb' : 'transparent',
+              'stroke-width': 1 * invZoom,
+              'stroke-dasharray': isSelected ? `${3 * invZoom} ${2 * invZoom}` : undefined,
+              cursor: isDraggingThis ? 'grabbing' : 'grab',
+              'pointer-events': 'all',
+            }),
+          );
+        } else if (isSelected) {
+          const chipSize = 9 * invZoom;
+          g.appendChild(
+            el('rect', {
+              class: 'diagrav-label-handle',
+              'data-label-kind': 'node',
+              'data-label-target-id': node.id,
+              'data-label-id': label.id,
+              x: boxX + estW - chipSize / 2,
+              y: boxY - chipSize / 2,
+              width: chipSize,
+              height: chipSize,
+              rx: 2.5 * invZoom,
+              fill: isDraggingThis ? '#2563eb' : '#eff6ff',
+              stroke: '#2563eb',
+              'stroke-width': 1.25 * invZoom,
+              cursor: isDraggingThis ? 'grabbing' : 'grab',
+              'pointer-events': 'all',
+            }),
+          );
+        }
       }
 
       const textEl = this.renderMultilineText(

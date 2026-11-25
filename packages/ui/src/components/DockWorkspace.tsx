@@ -56,6 +56,23 @@ export interface DockWorkspaceProps {
 
 const SNAP_EDGE_PX = 180;
 const DOCK_WIDTH_PX = 264;
+const DOCK_WIDTHS_KEY = 'diagrav.dockWidths.v1';
+
+function loadDockWidths(): { left: number; right: number } {
+  try {
+    const raw = localStorage.getItem(DOCK_WIDTHS_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as { left?: number; right?: number };
+      return {
+        left: Math.max(210, Math.min(420, parsed.left ?? DOCK_WIDTH_PX)),
+        right: Math.max(210, Math.min(420, parsed.right ?? DOCK_WIDTH_PX)),
+      };
+    }
+  } catch {
+    // ignore
+  }
+  return { left: DOCK_WIDTH_PX, right: DOCK_WIDTH_PX };
+}
 
 export function DockWorkspace({
   panels,
@@ -66,8 +83,22 @@ export function DockWorkspace({
   const stageRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef<DragInfo | null>(null);
   const resizeRef = useRef<ResizeInfo | null>(null);
+  const colResizeRef = useRef<{ side: DockSide; startX: number; origWidth: number } | null>(null);
+  const statesRef = useRef(states);
+  statesRef.current = states;
+  const draggingIdRef = useRef<string | null>(null);
+
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
+  const [dockWidths, setDockWidths] = useState(loadDockWidths);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(DOCK_WIDTHS_KEY, JSON.stringify(dockWidths));
+    } catch {
+      // ignore
+    }
+  }, [dockWidths]);
 
   const panelMap = new Map(panels.map((p) => [p.id, p]));
 
@@ -158,7 +189,7 @@ export function DockWorkspace({
     else if (relX >= rect.width - SNAP_EDGE_PX) side = 'right';
     if (!side) return null;
 
-    const othersOnSide = Object.values(states).filter(
+    const othersOnSide = Object.values(statesRef.current).filter(
       (s) => s.id !== panelId && s.open && s.mode === 'docked' && s.side === side,
     );
     if (othersOnSide.length === 0) {
@@ -217,6 +248,14 @@ export function DockWorkspace({
       const stageRect = stageRef.current?.getBoundingClientRect();
       if (!stageRect) return;
 
+      if (colResizeRef.current) {
+        const cr = colResizeRef.current;
+        const delta = cr.side === 'left' ? e.clientX - cr.startX : cr.startX - e.clientX;
+        const nextW = Math.max(210, Math.min(420, Math.round(cr.origWidth + delta)));
+        setDockWidths((prev) => ({ ...prev, [cr.side]: nextW }));
+        return;
+      }
+
       if (resizeRef.current) {
         const r = resizeRef.current;
         const nextW = Math.max(220, Math.min(520, Math.round(r.origWidth + (e.clientX - r.startClientX))));
@@ -237,8 +276,10 @@ export function DockWorkspace({
 
       if (!d.detached) {
         d.detached = true;
+        draggingIdRef.current = d.panelId;
         setDraggingId(d.panelId);
-      } else if (!draggingId) {
+      } else if (!draggingIdRef.current) {
+        draggingIdRef.current = d.panelId;
         setDraggingId(d.panelId);
       }
 
@@ -270,6 +311,10 @@ export function DockWorkspace({
     };
 
     const onUp = (e: PointerEvent) => {
+      if (colResizeRef.current) {
+        colResizeRef.current = null;
+        return;
+      }
       if (resizeRef.current) {
         resizeRef.current = null;
         return;
@@ -309,6 +354,7 @@ export function DockWorkspace({
         }
       }
 
+      draggingIdRef.current = null;
       setDraggingId(null);
       setDropTarget(null);
     };
@@ -321,7 +367,7 @@ export function DockWorkspace({
       window.removeEventListener('pointerup', onUp);
       window.removeEventListener('pointercancel', onUp);
     };
-  });
+  }, [onChangeStates]);
 
   const renderPane = (state: PanelState, isFloating: boolean) => {
     const cfg = panelMap.get(state.id);
@@ -402,15 +448,39 @@ export function DockWorkspace({
   return (
     <div ref={stageRef} className="diagrav-workspace-stage">
       {leftDocked.length > 0 && (
-        <aside className="diagrav-dock-column is-left" aria-label="Left Dock">
+        <aside
+          className="diagrav-dock-column is-left"
+          aria-label="Left Dock"
+          style={{ width: dockWidths.left, minWidth: dockWidths.left, maxWidth: dockWidths.left }}
+        >
           {leftDocked.map((s) => renderPane(s, false))}
+          <div
+            className="diagrav-dock-splitter is-left"
+            title="Drag to resize left dock"
+            onPointerDown={(e) => {
+              e.preventDefault();
+              colResizeRef.current = { side: 'left', startX: e.clientX, origWidth: dockWidths.left };
+            }}
+          />
         </aside>
       )}
 
       <main className="diagrav-workspace-center">{children}</main>
 
       {rightDocked.length > 0 && (
-        <aside className="diagrav-dock-column is-right" aria-label="Right Dock">
+        <aside
+          className="diagrav-dock-column is-right"
+          aria-label="Right Dock"
+          style={{ width: dockWidths.right, minWidth: dockWidths.right, maxWidth: dockWidths.right }}
+        >
+          <div
+            className="diagrav-dock-splitter is-right"
+            title="Drag to resize right dock"
+            onPointerDown={(e) => {
+              e.preventDefault();
+              colResizeRef.current = { side: 'right', startX: e.clientX, origWidth: dockWidths.right };
+            }}
+          />
           {rightDocked.map((s) => renderPane(s, false))}
         </aside>
       )}

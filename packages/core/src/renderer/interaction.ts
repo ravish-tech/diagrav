@@ -31,6 +31,16 @@ export interface SelectionState {
 
 export type SelectionListener = (selection: SelectionState) => void;
 
+export interface ContextMenuEvent {
+  clientX: number;
+  clientY: number;
+  worldPoint: Point;
+  targetKind: 'canvas' | 'node' | 'edge';
+  targetId?: string;
+}
+
+export type ContextMenuListener = (event: ContextMenuEvent) => void;
+
 type DragSession =
   | { kind: 'pan'; startX: number; startY: number; origVpX: number; origVpY: number }
   | { kind: 'marquee'; startWorld: Point; additive: boolean }
@@ -38,6 +48,8 @@ type DragSession =
       kind: 'move-nodes';
       startWorld: Point;
       origins: Map<string, { x: number; y: number }>;
+      clickedNodeId?: string;
+      collapseOnClick?: boolean;
       moved: boolean;
     }
   | {
@@ -114,7 +126,10 @@ export class InteractionController {
   private marqueeRect: RectBox | null = null;
   private draggingLabel: RenderState['draggingLabel'] = null;
   private drag: DragSession | null = null;
+  private spacePressed = false;
+  private clipboard: { nodes: DiagramNode[]; edges: DiagramEdge[]; pasteCount: number } | null = null;
   private selectionListeners = new Set<SelectionListener>();
+  private contextMenuListeners = new Set<ContextMenuListener>();
   private activeInlineInput: HTMLTextAreaElement | null = null;
 
   constructor(
@@ -217,12 +232,128 @@ export class InteractionController {
     return () => this.selectionListeners.delete(listener);
   }
 
+  onContextMenu(listener: ContextMenuListener): () => void {
+    this.contextMenuListeners.add(listener);
+    return () => this.contextMenuListeners.delete(listener);
+  }
+
+  hasClipboard(): boolean {
+    return Boolean(this.clipboard && this.clipboard.nodes.length > 0);
+  }
+
+  copySelection(): boolean {
+    if (this.selectedNodeIds.size === 0) return false;
+    const doc = this.engine.getDocument();
+    const nodes = doc.nodes.filter((n) => this.selectedNodeIds.has(n.id)).map((n) => structuredClone(n));
+    const edges = doc.edges
+      .filter((e) => this.selectedNodeIds.has(e.source.nodeId) && this.selectedNodeIds.has(e.target.nodeId))
+      .map((e) => structuredClone(e));
+    this.clipboard = { nodes, edges, pasteCount: 0 };
+    return true;
+  }
+
+  pasteClipboard(): boolean {
+    if (this.mode !== 'editor' || !this.clipboard || this.clipboard.nodes.length === 0) return false;
+    this.clipboard.pasteCount += 1;
+    const offset = this.clipboard.pasteCount * 24;
+    return this.insertClonedSubgraph(this.clipboard.nodes, this.clipboard.edges, offset, offset, 'Paste');
+  }
+
+  duplicateSelection(): boolean {
+    if (this.mode !== 'editor' || this.selectedNodeIds.size === 0) return false;
+    const doc = this.engine.getDocument();
+    const nodes = doc.nodes.filter((n) => this.selectedNodeIds.has(n.id));
+    const edges = doc.edges.filter(
+      (e) => this.selectedNodeIds.has(e.source.nodeId) && this.selectedNodeIds.has(e.target.nodeId),
+    );
+    return this.insertClonedSubgraph(nodes, edges, 24, 24, 'Duplicate selection');
+  }
+
+  private insertClonedSubgraph(
+    nodes: DiagramNode[],
+    edges: DiagramEdge[],
+    dx: number,
+    dy: number,
+    label: string,
+  ): boolean {
+    const idMap = new Map<string, string>();
+    const commands: DiagramCommand[] = [];
+    const newNodeIds: string[] = [];
+
+    for (const orig of nodes) {
+      const copy = structuredClone(orig);
+      const newId = generateId('node');
+      idMap.set(orig.id, newId);
+      copy.id = newId;
+      copy.geometry.x += dx;
+      copy.geometry.y += dy;
+      copy.labels = copy.labels.map((l) => ({ ...l, id: generateId('lbl') }));
+      commands.push({ type: 'node.create', node: copy });
+      newNodeIds.push(newId);
+    }
+
+    for (const origEdge of edges) {
+      const newSrc = idMap.get(origEdge.source.nodeId);
+      const newTgt = idMap.get(origEdge.target.nodeId);
+      if (!newSrc || !newTgt) continue;
+      const copyEdge = structuredClone(origEdge);
+      copyEdge.id = generateId('edge');
+      copyEdge.source = { ...copyEdge.source, nodeId: newSrc };
+      copyEdge.target = { ...copyEdge.target, nodeId: newTgt };
+      copyEdge.bends = copyEdge.bends.map((b) => ({ x: b.x + dx, y: b.y + dy }));
+      copyEdge.labels = copyEdge.labels.map((l) => ({ ...l, id: generateId('lbl') }));
+      commands.push({ type: 'edge.create', edge: copyEdge });
+    }
+
+    if (commands.length === 0) return false;
+    this.engine.execute({ type: 'batch', commands, label });
+    this.selectNodes(newNodeIds);
+    return true;
+  }
+
+  zoomBy(factor: number): void {
+    const doc = this.engine.getDocument();
+    const rect = this.renderer.svg.getBoundingClientRect();
+    const cx = rect.width / 2;
+    const cy = rect.height / 2;
+    const nextZoom = Math.max(0.15, Math.min(4, doc.viewport.zoom * factor));
+    const scaleRatio = nextZoom / doc.viewport.zoom;
+    this.engine.execute({
+      type: 'viewport.set',
+      viewport: {
+        x: cx - (cx - doc.viewport.x) * scaleRatio,
+        y: cy - (cy - doc.viewport.y) * scaleRatio,
+        zoom: nextZoom,
+      },
+      recordHistory: false,
+    });
+  }
+
+  setZoom(zoom: number): void {
+    const doc = this.engine.getDocument();
+    const rect = this.renderer.svg.getBoundingClientRect();
+    const cx = rect.width / 2;
+    const cy = rect.height / 2;
+    const nextZoom = Math.max(0.15, Math.min(4, zoom));
+    const scaleRatio = nextZoom / doc.viewport.zoom;
+    this.engine.execute({
+      type: 'viewport.set',
+      viewport: {
+        x: cx - (cx - doc.viewport.x) * scaleRatio,
+        y: cy - (cy - doc.viewport.y) * scaleRatio,
+        zoom: nextZoom,
+      },
+      recordHistory: false,
+    });
+  }
+
   destroy(): void {
     this.abortDrag();
     this.closeInlineEditor(false);
     const svg = this.renderer.svg;
     svg.removeEventListener('pointerdown', this.onPointerDown);
     svg.removeEventListener('selectstart', this.onSelectStart);
+    svg.removeEventListener('contextmenu', this.onContextMenuDom);
     window.removeEventListener('pointermove', this.onPointerMove);
     window.removeEventListener('pointerup', this.onPointerUp);
     window.removeEventListener('pointercancel', this.onPointerCancel);
@@ -230,12 +361,14 @@ export class InteractionController {
     svg.removeEventListener('wheel', this.onWheel);
     svg.removeEventListener('dblclick', this.onDoubleClick);
     window.removeEventListener('keydown', this.onKeyDown);
+    window.removeEventListener('keyup', this.onKeyUp);
   }
 
   private bindEvents(): void {
     const svg = this.renderer.svg;
     svg.addEventListener('pointerdown', this.onPointerDown);
     svg.addEventListener('selectstart', this.onSelectStart);
+    svg.addEventListener('contextmenu', this.onContextMenuDom);
     window.addEventListener('pointermove', this.onPointerMove);
     window.addEventListener('pointerup', this.onPointerUp);
     window.addEventListener('pointercancel', this.onPointerCancel);
@@ -243,7 +376,52 @@ export class InteractionController {
     svg.addEventListener('wheel', this.onWheel, { passive: false });
     svg.addEventListener('dblclick', this.onDoubleClick);
     window.addEventListener('keydown', this.onKeyDown);
+    window.addEventListener('keyup', this.onKeyUp);
   }
+
+  private onContextMenuDom = (e: MouseEvent): void => {
+    if (this.contextMenuListeners.size === 0) return;
+    e.preventDefault();
+    const doc = this.engine.getDocument();
+    const worldPoint = this.renderer.screenToWorld(e.clientX, e.clientY, doc);
+    const target = e.target as Element | null;
+    const nodeId = target?.closest('[data-node-id]')?.getAttribute('data-node-id');
+    const edgeId =
+      target?.closest('[data-edge-hit-id]')?.getAttribute('data-edge-hit-id') ??
+      target?.closest('[data-edge-id]')?.getAttribute('data-edge-id');
+
+    let targetKind: 'canvas' | 'node' | 'edge' = 'canvas';
+    let targetId: string | undefined;
+    if (nodeId) {
+      targetKind = 'node';
+      targetId = nodeId;
+      if (!this.selectedNodeIds.has(nodeId)) {
+        this.selectNodes([nodeId]);
+      }
+    } else if (edgeId) {
+      targetKind = 'edge';
+      targetId = edgeId;
+      if (!this.selectedEdgeIds.has(edgeId)) {
+        this.selectEdges([edgeId]);
+      }
+    }
+
+    const payload: ContextMenuEvent = {
+      clientX: e.clientX,
+      clientY: e.clientY,
+      worldPoint,
+      targetKind,
+      targetId,
+    };
+    for (const l of this.contextMenuListeners) l(payload);
+  };
+
+  private onKeyUp = (e: KeyboardEvent): void => {
+    if (e.key === ' ' && this.spacePressed) {
+      this.spacePressed = false;
+      this.renderer.svg.style.cursor = this.tool === 'edge' ? 'crosshair' : 'default';
+    }
+  };
 
   private onSelectStart = (e: Event): void => {
     e.preventDefault();
@@ -366,6 +544,10 @@ export class InteractionController {
   };
 
   private onWindowBlur = (): void => {
+    if (this.spacePressed) {
+      this.spacePressed = false;
+      this.renderer.svg.style.cursor = this.tool === 'edge' ? 'crosshair' : 'default';
+    }
     this.abortDrag();
   };
 
@@ -380,8 +562,9 @@ export class InteractionController {
     const doc = this.engine.getDocument();
     const world = this.renderer.screenToWorld(e.clientX, e.clientY, doc);
 
-    // Middle mouse => pan
-    if (e.button === 1) {
+    // Middle mouse OR Space+drag => pan
+    if (e.button === 1 || this.spacePressed) {
+      this.renderer.svg.style.cursor = 'grabbing';
       this.drag = {
         kind: 'pan',
         startX: e.clientX,
@@ -521,6 +704,9 @@ export class InteractionController {
         return;
       }
 
+      const wasAlreadyInMulti =
+        !e.shiftKey && this.selectedNodeIds.size > 1 && this.selectedNodeIds.has(nodeId);
+
       if (e.shiftKey) {
         if (this.selectedNodeIds.has(nodeId)) this.selectedNodeIds.delete(nodeId);
         else this.selectedNodeIds.add(nodeId);
@@ -531,18 +717,66 @@ export class InteractionController {
       this.emitSelection();
 
       if (this.mode === 'editor') {
+        // Alt+drag on a node detaches/moves its primary label directly
+        if (e.altKey) {
+          const node = this.engine.getNode(nodeId);
+          const lbl = node?.labels[0];
+          if (node && lbl) {
+            this.drag = {
+              kind: 'move-label',
+              targetKind: 'node',
+              targetId: nodeId,
+              labelId: lbl.id,
+              startClientX: e.clientX,
+              startClientY: e.clientY,
+              origPlacement: structuredClone(lbl.placement),
+              moved: false,
+            };
+            this.redraw();
+            return;
+          }
+        }
+
         const origins = new Map<string, { x: number; y: number }>();
         for (const id of this.selectedNodeIds) {
           const n = this.engine.getNode(id);
           if (n) origins.set(id, { x: n.geometry.x, y: n.geometry.y });
         }
-        this.drag = { kind: 'move-nodes', startWorld: world, origins, moved: false };
+
+        // Moving a container automatically carries all nodes whose centers lie inside it
+        if (!e.altKey) {
+          for (const id of this.selectedNodeIds) {
+            const container = this.engine.getNode(id);
+            if (!container || !this.shapes.get(container.type).isContainer) continue;
+            const cx1 = container.geometry.x;
+            const cy1 = container.geometry.y;
+            const cx2 = cx1 + container.geometry.width;
+            const cy2 = cy1 + container.geometry.height;
+            for (const other of doc.nodes) {
+              if (origins.has(other.id)) continue;
+              const ox = other.geometry.x + other.geometry.width / 2;
+              const oy = other.geometry.y + other.geometry.height / 2;
+              if (ox >= cx1 && ox <= cx2 && oy >= cy1 && oy <= cy2) {
+                origins.set(other.id, { x: other.geometry.x, y: other.geometry.y });
+              }
+            }
+          }
+        }
+
+        this.drag = {
+          kind: 'move-nodes',
+          startWorld: world,
+          origins,
+          clickedNodeId: nodeId,
+          collapseOnClick: wasAlreadyInMulti,
+          moved: false,
+        };
       }
       this.redraw();
       return;
     }
 
-    // 5. Edge hit (select OR yEd-style drag >4px to insert bend)
+    // 5. Edge hit (select AND allow 1-motion drag >4px to insert bend)
     const edgeHitEl = target?.closest('[data-edge-hit-id]') as Element | null;
     const edgeHitId = edgeHitEl?.getAttribute('data-edge-hit-id');
     if (edgeHitId) {
@@ -565,7 +799,7 @@ export class InteractionController {
         this.redraw();
       }
 
-      if (this.mode === 'editor' && wasSelected) {
+      if (this.mode === 'editor') {
         const edge = this.engine.getEdge(edgeHitId);
         if (edge) {
           const src = this.engine.getNode(edge.source.nodeId);
@@ -587,9 +821,10 @@ export class InteractionController {
       return;
     }
 
-    // 6. Empty canvas => Shift+drag marquee select (editor) OR clear selection + start pan
-    if (this.mode === 'editor' && e.shiftKey) {
-      this.drag = { kind: 'marquee', startWorld: world, additive: true };
+    // 6. Empty canvas => Editor: marquee box-select (Space+drag / middle-click pans); Readonly: pan
+    if (this.mode === 'editor') {
+      if (!e.shiftKey) this.clearSelection();
+      this.drag = { kind: 'marquee', startWorld: world, additive: e.shiftKey };
       this.marqueeRect = { x: world.x, y: world.y, width: 0, height: 0 };
       this.redraw();
       return;
@@ -612,8 +847,8 @@ export class InteractionController {
       if (this.mode === 'editor' && this.isSvgVisible()) {
         const target = e.target as Element | null;
         const portNodeId = target?.closest?.('[data-port-node-id]')?.getAttribute('data-port-node-id');
-        // Include port-radius margin so hovering onto a port circle never clears hoveredNodeId
-        const hoverMargin = 9 / Math.max(0.15, doc.viewport.zoom);
+        // Include outward port-offset margin (18px) so hovering onto outward ports never clears hoveredNodeId
+        const hoverMargin = 18 / Math.max(0.15, doc.viewport.zoom);
         const hovered = portNodeId ?? this.findNodeAt(world, hoverMargin)?.id ?? null;
         if (hovered !== this.hoveredNodeId) {
           this.hoveredNodeId = hovered;
@@ -681,7 +916,12 @@ export class InteractionController {
         let usedSmartSnapY = false;
 
         if (!bypassSnap && Number.isFinite(minX)) {
-          const others = doc.nodes.filter((n) => !this.drag || (this.drag.kind === 'move-nodes' && !this.drag.origins.has(n.id)));
+          // Exclude moving nodes AND background containers from smart-snap targets so nodes inside a Group Box don't jitter
+          const others = doc.nodes.filter(
+            (n) =>
+              (!this.drag || (this.drag.kind === 'move-nodes' && !this.drag.origins.has(n.id))) &&
+              !this.shapes.get(n.type).isContainer,
+          );
           const threshold = 6 / Math.max(0.25, Math.min(1.5, doc.viewport.zoom));
           const smart = computeSmartSnap(
             { x: minX, y: minY, width: maxX - minX, height: maxY - minY },
@@ -868,6 +1108,15 @@ export class InteractionController {
     this.marqueeRect = null;
 
     switch (session.kind) {
+      case 'pan': {
+        this.renderer.svg.style.cursor = this.spacePressed
+          ? 'grab'
+          : this.tool === 'edge'
+            ? 'crosshair'
+            : 'default';
+        break;
+      }
+
       case 'marquee': {
         if (finishedMarquee && (finishedMarquee.width > 4 || finishedMarquee.height > 4)) {
           const doc = this.engine.getDocument();
@@ -881,6 +1130,10 @@ export class InteractionController {
               const my1 = finishedMarquee.y;
               const mx2 = mx1 + finishedMarquee.width;
               const my2 = my1 + finishedMarquee.height;
+              // Require FULL enclosure for containers so box-selecting children inside a Group Box doesn't select the Group Box
+              if (this.shapes.get(n.type).isContainer) {
+                return nx1 >= mx1 && nx2 <= mx2 && ny1 >= my1 && ny2 <= my2;
+              }
               return nx1 <= mx2 && nx2 >= mx1 && ny1 <= my2 && ny2 >= my1;
             })
             .map((n) => n.id);
@@ -898,7 +1151,13 @@ export class InteractionController {
       }
 
       case 'move-nodes': {
-        if (!session.moved) break;
+        if (!session.moved) {
+          // Clicking an already-selected member of a multi-selection without dragging narrows to that single node
+          if (session.collapseOnClick && session.clickedNodeId) {
+            this.selectNodes([session.clickedNodeId]);
+          }
+          break;
+        }
         const finals = new Map<string, Point>();
         let anyChanged = false;
         for (const [id, orig] of session.origins.entries()) {
@@ -1120,6 +1379,33 @@ export class InteractionController {
     const mod = e.metaKey || e.ctrlKey;
     const key = e.key.toLowerCase();
 
+    // Space => temporary hand-pan mode
+    if (e.key === ' ' && !mod) {
+      e.preventDefault();
+      if (!this.spacePressed) {
+        this.spacePressed = true;
+        this.renderer.svg.style.cursor = 'grab';
+      }
+      return;
+    }
+
+    // Zoom hotkeys (Cmd+=, Cmd+-, Cmd+0)
+    if (mod && (e.key === '=' || e.key === '+')) {
+      e.preventDefault();
+      this.zoomBy(1.2);
+      return;
+    }
+    if (mod && e.key === '-') {
+      e.preventDefault();
+      this.zoomBy(1 / 1.2);
+      return;
+    }
+    if (mod && e.key === '0') {
+      e.preventDefault();
+      this.setZoom(1);
+      return;
+    }
+
     // Undo / Redo (Cmd+Z / Cmd+Shift+Z / Ctrl+Y)
     if (mod && key === 'z') {
       e.preventDefault();
@@ -1133,6 +1419,29 @@ export class InteractionController {
       return;
     }
 
+    // Copy / Cut / Paste (Cmd+C / Cmd+X / Cmd+V)
+    if (mod && key === 'c' && this.selectedNodeIds.size > 0) {
+      e.preventDefault();
+      this.copySelection();
+      return;
+    }
+    if (mod && key === 'x' && this.selectedNodeIds.size > 0) {
+      e.preventDefault();
+      if (this.copySelection()) {
+        const commands: DiagramCommand[] = [];
+        for (const id of this.selectedEdgeIds) commands.push({ type: 'edge.delete', id });
+        for (const id of this.selectedNodeIds) commands.push({ type: 'node.delete', id });
+        this.engine.execute({ type: 'batch', commands, label: 'Cut selection' });
+        this.clearSelection();
+      }
+      return;
+    }
+    if (mod && key === 'v' && this.hasClipboard()) {
+      e.preventDefault();
+      this.pasteClipboard();
+      return;
+    }
+
     // Select All (Cmd+A)
     if (mod && key === 'a') {
       e.preventDefault();
@@ -1141,26 +1450,10 @@ export class InteractionController {
       return;
     }
 
-    // Duplicate selected nodes (Cmd+D)
+    // Duplicate selected nodes + internal edges (Cmd+D)
     if (mod && key === 'd' && this.selectedNodeIds.size > 0) {
       e.preventDefault();
-      const commands: DiagramCommand[] = [];
-      const newIds: string[] = [];
-      for (const id of this.selectedNodeIds) {
-        const orig = this.engine.getNode(id);
-        if (!orig) continue;
-        const copy = structuredClone(orig);
-        copy.id = generateId('node');
-        copy.geometry.x += 24;
-        copy.geometry.y += 24;
-        copy.labels = copy.labels.map((l) => ({ ...l, id: generateId('lbl') }));
-        commands.push({ type: 'node.create', node: copy });
-        newIds.push(copy.id);
-      }
-      if (commands.length > 0) {
-        this.engine.execute({ type: 'batch', commands, label: 'Duplicate nodes' });
-        this.selectNodes(newIds);
-      }
+      this.duplicateSelection();
       return;
     }
 
@@ -1227,15 +1520,21 @@ export class InteractionController {
     const doc = this.engine.getDocument();
     let worldPos: Point;
     let initialText = '';
+    let baseFontSize = 13;
+    let align: 'left' | 'center' | 'right' = 'center';
+    let editorWidth = 180;
 
     if (kind === 'node') {
       const node = this.engine.getNode(id);
       if (!node) return;
+      editorWidth = Math.max(130, Math.min(320, Math.round(node.geometry.width * doc.viewport.zoom)));
       const existing = node.labels[0];
       if (existing) {
         const pos = computeNodeLabelPosition(node, existing);
         worldPos = { x: pos.x, y: pos.y };
         initialText = existing.text;
+        baseFontSize = existing.style.fontSize;
+        align = pos.textAnchor === 'start' ? 'left' : pos.textAnchor === 'end' ? 'right' : 'center';
       } else {
         worldPos = {
           x: node.geometry.x + node.geometry.width / 2,
@@ -1254,23 +1553,25 @@ export class InteractionController {
         const pos = computeEdgeLabelPosition(routed.points, existing);
         worldPos = { x: pos.x, y: pos.y };
         initialText = existing.text;
+        baseFontSize = existing.style.fontSize;
       } else {
         worldPos = pointAlongPolyline(routed.points, 0.5).point;
       }
     }
 
     const screen = this.renderer.worldToScreen(worldPos, doc);
+    const scaledFont = Math.max(11, Math.min(28, Math.round(baseFontSize * doc.viewport.zoom)));
     const input = document.createElement('textarea');
     input.value = initialText;
     input.rows = Math.max(1, initialText.split('\n').length);
     input.style.position = 'fixed';
-    input.style.width = '180px';
+    input.style.width = `${editorWidth}px`;
     input.style.minHeight = '30px';
     input.style.padding = '4px 8px';
     input.style.fontFamily = 'system-ui, -apple-system, sans-serif';
-    input.style.fontSize = '13px';
+    input.style.fontSize = `${scaledFont}px`;
     input.style.lineHeight = '1.3';
-    input.style.textAlign = 'center';
+    input.style.textAlign = align;
     input.style.resize = 'none';
     input.style.overflow = 'hidden';
     input.style.boxSizing = 'border-box';
@@ -1286,7 +1587,13 @@ export class InteractionController {
       input.style.height = 'auto';
       const h = Math.max(30, input.scrollHeight + 4);
       input.style.height = `${h}px`;
-      input.style.left = `${screen.x - 90}px`;
+      const leftPos =
+        align === 'left'
+          ? screen.x - 8
+          : align === 'right'
+            ? screen.x - editorWidth + 8
+            : screen.x - editorWidth / 2;
+      input.style.left = `${leftPos}px`;
       input.style.top = `${screen.y - h / 2}px`;
     };
 

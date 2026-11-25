@@ -3,6 +3,7 @@ import {
   createDefaultNode,
   createDefaultNodeLabel,
   validateDocument,
+  type ContextMenuEvent,
   type DiagramCommand,
   type DiagramDocument,
   type EdgePatch,
@@ -23,7 +24,7 @@ import { Toolbar, type AppViewMode } from './components/Toolbar';
 import { useAiBridge } from './hooks/useAiBridge';
 import { SAMPLES } from './samples';
 
-const PANEL_LAYOUT_KEY = 'diagrav.panelLayout.v1';
+const PANEL_LAYOUT_KEY = 'diagrav.panelLayout.v2';
 
 function createDefaultPanelStates(): Record<string, PanelState> {
   return {
@@ -121,7 +122,19 @@ export function App() {
   });
   const [history, setHistory] = useState({ canUndo: false, canRedo: false });
   const [shapes, setShapes] = useState<ShapeDefinition[]>([]);
+  const [contextMenu, setContextMenu] = useState<ContextMenuEvent | null>(null);
   const aiBridge = useAiBridge(diagravRef, doc);
+
+  useEffect(() => {
+    if (!contextMenu) return;
+    const close = () => setContextMenu(null);
+    window.addEventListener('pointerdown', close);
+    window.addEventListener('keydown', close);
+    return () => {
+      window.removeEventListener('pointerdown', close);
+      window.removeEventListener('keydown', close);
+    };
+  }, [contextMenu]);
 
   useEffect(() => {
     try {
@@ -145,6 +158,7 @@ export function App() {
     const unsubDoc = instance.onChange((next) => setDoc(next));
     const unsubSel = instance.onSelectionChange((sel) => setSelection(sel));
     const unsubHist = instance.onHistoryChange((h) => setHistory(h));
+    const unsubCtx = instance.onContextMenu((ev) => setContextMenu(ev));
 
     const raf = requestAnimationFrame(() => instance.fitToView(48));
 
@@ -153,6 +167,7 @@ export function App() {
       unsubDoc();
       unsubSel();
       unsubHist();
+      unsubCtx();
       instance.destroy();
       diagravRef.current = null;
     };
@@ -258,6 +273,15 @@ export function App() {
     diagravRef.current?.execute({ type: 'node.update', id, patch }, mergeKey ? { mergeKey } : undefined);
   };
 
+  const handleBatchUpdateNodes = (ids: string[], patch: NodePatch, mergeKey?: string) => {
+    if (viewMode !== 'editor' || ids.length === 0) return;
+    const commands: DiagramCommand[] = ids.map((id) => ({ type: 'node.update', id, patch }));
+    diagravRef.current?.execute(
+      { type: 'batch', commands, label: 'Batch update nodes' },
+      mergeKey ? { mergeKey } : undefined,
+    );
+  };
+
   const handleUpdateEdge = (id: string, patch: EdgePatch, mergeKey?: string) => {
     if (viewMode !== 'editor') return;
     diagravRef.current?.execute({ type: 'edge.update', id, patch }, mergeKey ? { mergeKey } : undefined);
@@ -330,6 +354,7 @@ export function App() {
               shapes={shapes}
               readOnly={viewMode === 'readonly'}
               onUpdateNode={handleUpdateNode}
+              onBatchUpdateNodes={handleBatchUpdateNodes}
               onUpdateEdge={handleUpdateEdge}
               onAlignNodes={(a) => diagravRef.current?.alignSelected(a)}
               onDistributeNodes={(m) => diagravRef.current?.distributeSelected(m)}
@@ -459,8 +484,29 @@ export function App() {
                     ? 'AI Bridge: Connecting…'
                     : 'AI Bridge: Off'}
               </StatusBarItem>
-              <StatusBarItem>
-                Zoom: <strong>{Math.round(doc.viewport.zoom * 100)}%</strong>
+              <StatusBarItem
+                as="button"
+                interactive
+                onClick={() => diagravRef.current?.zoomBy(1 / 1.2)}
+                title="Zoom Out (Cmd+-)"
+              >
+                −
+              </StatusBarItem>
+              <StatusBarItem
+                as="button"
+                interactive
+                onClick={() => diagravRef.current?.setZoom(1)}
+                title="Reset Zoom to 100% (Cmd+0)"
+              >
+                <strong>{Math.round(doc.viewport.zoom * 100)}%</strong>
+              </StatusBarItem>
+              <StatusBarItem
+                as="button"
+                interactive
+                onClick={() => diagravRef.current?.zoomBy(1.2)}
+                title="Zoom In (Cmd+=)"
+              >
+                +
               </StatusBarItem>
               <StatusBarItem>
                 Nodes: {doc.nodes.length} · Edges: {doc.edges.length}
@@ -468,6 +514,181 @@ export function App() {
             </>
           }
         />
+      )}
+
+      {contextMenu && viewMode === 'editor' && (
+        <div
+          className="diagrav-context-menu"
+          style={{
+            left: Math.max(8, Math.min(contextMenu.clientX, window.innerWidth - 208)),
+            top: Math.max(8, Math.min(contextMenu.clientY, window.innerHeight - 260)),
+          }}
+          onPointerDown={(e) => e.stopPropagation()}
+        >
+          {contextMenu.targetKind === 'node' && contextMenu.targetId && (
+            <>
+              <button
+                type="button"
+                className="diagrav-context-item"
+                onClick={() => {
+                  diagravRef.current?.interaction.openInlineLabelEditor('node', contextMenu.targetId!);
+                  setContextMenu(null);
+                }}
+              >
+                <span>Edit Label</span>
+                <span className="diagrav-context-kbd">F2</span>
+              </button>
+              <button
+                type="button"
+                className="diagrav-context-item"
+                onClick={() => {
+                  diagravRef.current?.duplicateSelection();
+                  setContextMenu(null);
+                }}
+              >
+                <span>Duplicate</span>
+                <span className="diagrav-context-kbd">⌘D</span>
+              </button>
+              <button
+                type="button"
+                className="diagrav-context-item"
+                onClick={() => {
+                  diagravRef.current?.copySelection();
+                  setContextMenu(null);
+                }}
+              >
+                <span>Copy</span>
+                <span className="diagrav-context-kbd">⌘C</span>
+              </button>
+              <div className="diagrav-context-sep" />
+              <button
+                type="button"
+                className="diagrav-context-item"
+                onClick={() => {
+                  diagravRef.current?.bringToFront(contextMenu.targetId!);
+                  setContextMenu(null);
+                }}
+              >
+                <span>Bring to Front</span>
+              </button>
+              <button
+                type="button"
+                className="diagrav-context-item"
+                onClick={() => {
+                  diagravRef.current?.sendToBack(contextMenu.targetId!);
+                  setContextMenu(null);
+                }}
+              >
+                <span>Send to Back</span>
+              </button>
+              <div className="diagrav-context-sep" />
+              <button
+                type="button"
+                className="diagrav-context-item is-danger"
+                onClick={() => {
+                  handleDeleteSelection();
+                  setContextMenu(null);
+                }}
+              >
+                <span>Delete</span>
+                <span className="diagrav-context-kbd">Del</span>
+              </button>
+            </>
+          )}
+
+          {contextMenu.targetKind === 'edge' && contextMenu.targetId && (
+            <>
+              <button
+                type="button"
+                className="diagrav-context-item"
+                onClick={() => {
+                  diagravRef.current?.interaction.openInlineLabelEditor('edge', contextMenu.targetId!);
+                  setContextMenu(null);
+                }}
+              >
+                <span>Edit Label</span>
+                <span className="diagrav-context-kbd">F2</span>
+              </button>
+              <button
+                type="button"
+                className="diagrav-context-item"
+                onClick={() => {
+                  const edge = diagravRef.current?.engine.getEdge(contextMenu.targetId!);
+                  if (edge) {
+                    handleUpdateEdge(edge.id, {
+                      source: edge.target,
+                      target: edge.source,
+                      bends: [...edge.bends].reverse(),
+                    });
+                  }
+                  setContextMenu(null);
+                }}
+              >
+                <span>Reverse Direction</span>
+              </button>
+              <button
+                type="button"
+                className="diagrav-context-item"
+                onClick={() => {
+                  handleUpdateEdge(contextMenu.targetId!, { bends: [] });
+                  setContextMenu(null);
+                }}
+              >
+                <span>Clear Bends</span>
+              </button>
+              <div className="diagrav-context-sep" />
+              <button
+                type="button"
+                className="diagrav-context-item is-danger"
+                onClick={() => {
+                  handleDeleteSelection();
+                  setContextMenu(null);
+                }}
+              >
+                <span>Delete</span>
+                <span className="diagrav-context-kbd">Del</span>
+              </button>
+            </>
+          )}
+
+          {contextMenu.targetKind === 'canvas' && (
+            <>
+              <button
+                type="button"
+                className="diagrav-context-item"
+                disabled={!diagravRef.current?.interaction.hasClipboard()}
+                onClick={() => {
+                  diagravRef.current?.pasteClipboard();
+                  setContextMenu(null);
+                }}
+              >
+                <span>Paste</span>
+                <span className="diagrav-context-kbd">⌘V</span>
+              </button>
+              <button
+                type="button"
+                className="diagrav-context-item"
+                onClick={() => {
+                  diagravRef.current?.fitToView(48);
+                  setContextMenu(null);
+                }}
+              >
+                <span>Fit to View</span>
+              </button>
+              <button
+                type="button"
+                className="diagrav-context-item"
+                onClick={() => {
+                  diagravRef.current?.setZoom(1);
+                  setContextMenu(null);
+                }}
+              >
+                <span>Reset Zoom (100%)</span>
+                <span className="diagrav-context-kbd">⌘0</span>
+              </button>
+            </>
+          )}
+        </div>
       )}
 
       <JsonViewerModal

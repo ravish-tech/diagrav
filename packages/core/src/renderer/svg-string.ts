@@ -35,7 +35,13 @@ function renderMultilineTextSvg(
     return `<text ${attrStr}>${escapeXml(text)}</text>`;
   }
   const lineHeight = fontSize * 1.25;
-  const startOffset = -((lines.length - 1) * lineHeight) / 2;
+  const baseline = attrs['dominant-baseline'];
+  const startOffset =
+    baseline === 'hanging'
+      ? 0
+      : baseline === 'auto'
+        ? -(lines.length - 1) * lineHeight
+        : -((lines.length - 1) * lineHeight) / 2;
   const tspans = lines
     .map(
       (line, idx) =>

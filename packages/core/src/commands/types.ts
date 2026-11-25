@@ -39,6 +39,7 @@ export type DiagramCommand =
   | { type: 'node.create'; node: DiagramNode }
   | { type: 'node.update'; id: string; patch: NodePatch }
   | { type: 'node.delete'; id: string }
+  | { type: 'node.reorder'; id: string; position: 'front' | 'back' }
   | { type: 'edge.create'; edge: DiagramEdge }
   | { type: 'edge.update'; id: string; patch: EdgePatch }
   | { type: 'edge.delete'; id: string }

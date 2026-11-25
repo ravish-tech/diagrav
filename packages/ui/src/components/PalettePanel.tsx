@@ -8,20 +8,26 @@ export interface PalettePanelProps {
   onAddShape: (shape: ShapeDefinition) => void;
 }
 
+function fitPreviewBox(defaultSize: { width: number; height: number }, maxW = 34, maxH = 22) {
+  const scale = Math.min(maxW / Math.max(1, defaultSize.width), maxH / Math.max(1, defaultSize.height));
+  const w = Math.max(10, Math.round(defaultSize.width * scale * 10) / 10);
+  const h = Math.max(10, Math.round(defaultSize.height * scale * 10) / 10);
+  const ox = (maxW - w) / 2;
+  const oy = (maxH - h) / 2;
+  return { w, h, ox, oy };
+}
+
 export function PalettePanel({ shapes, disabled, onAddShape }: PalettePanelProps) {
   const [query, setQuery] = useState('');
+  const [openCategories, setOpenCategories] = useState<string[]>(['Basic Shapes', 'Architecture']);
   const normalized = query.trim().toLowerCase();
 
   const categories = useMemo(() => {
     const map = new Map<string, ShapeDefinition[]>();
     for (const s of shapes) {
-      if (
-        normalized &&
-        !s.label.toLowerCase().includes(normalized) &&
-        !s.type.toLowerCase().includes(normalized) &&
-        !s.category.toLowerCase().includes(normalized)
-      ) {
-        continue;
+      if (normalized) {
+        const hay = [s.label, s.type, s.category, ...(s.keywords ?? [])].join(' ').toLowerCase();
+        if (!hay.includes(normalized)) continue;
       }
       const list = map.get(s.category) ?? [];
       list.push(s);
@@ -30,23 +36,30 @@ export function PalettePanel({ shapes, disabled, onAddShape }: PalettePanelProps
     return Array.from(map.entries());
   }, [shapes, normalized]);
 
-  // Only open Basic Shapes by default to keep palette compact; auto-expand all matches while searching
-  const openDefaults = normalized
-    ? categories.map(([cat]) => cat)
-    : categories.length > 0
-      ? [categories[0][0]]
-      : [];
+  const activeValues = normalized ? categories.map(([cat]) => cat) : openCategories;
 
   return (
     <div className="diagrav-panel diagrav-palette-panel">
       <Stack gap="inline">
-        <Input
-          size="sm"
-          aria-label="Search shapes"
-          placeholder="Search shapes…"
-          value={query}
-          onValueChange={setQuery}
-        />
+        <div className="diagrav-search-wrap">
+          <Input
+            size="sm"
+            aria-label="Search shapes"
+            placeholder="Search shapes (e.g. db, vpc, cloud)…"
+            value={query}
+            onValueChange={setQuery}
+          />
+          {query && (
+            <button
+              type="button"
+              className="diagrav-search-clear"
+              aria-label="Clear search"
+              onClick={() => setQuery('')}
+            >
+              ×
+            </button>
+          )}
+        </div>
 
         {categories.length === 0 ? (
           <div style={{ fontSize: 12, color: 'var(--j-fg-muted, #64748b)', padding: '8px 2px' }}>
@@ -54,17 +67,23 @@ export function PalettePanel({ shapes, disabled, onAddShape }: PalettePanelProps
           </div>
         ) : (
           <Accordion
-            key={normalized ? `search:${normalized}` : `init:${categories.length}`}
             variant="divided"
             size="sm"
             multiple
-            defaultValue={openDefaults}
+            value={activeValues}
+            onValueChange={(next) => {
+              if (!normalized) {
+                setOpenCategories(Array.isArray(next) ? next : [next]);
+              }
+            }}
           >
             {categories.map(([category, items]) => (
               <AccordionItem key={category} value={category} title={`${category} (${items.length})`}>
                 <div className="diagrav-palette-grid">
                   {items.map((shape) => {
-                    const decD = shape.renderDecorations?.(36, 24, shape.defaultBorderRadius);
+                    const { w, h, ox, oy } = fitPreviewBox(shape.defaultSize, 34, 22);
+                    const r = shape.defaultBorderRadius ? Math.min(4, w / 4, h / 4) : 0;
+                    const decD = shape.renderDecorations?.(w, h, r);
                     return (
                       <button
                         key={shape.type}
@@ -83,22 +102,24 @@ export function PalettePanel({ shapes, disabled, onAddShape }: PalettePanelProps
                             : `${shape.label} (${shape.category}) — drag or click to add`
                         }
                       >
-                        <svg width="36" height="24" viewBox="-3 -3 42 30" aria-hidden="true">
-                          <path
-                            d={shape.renderPath(36, 24, shape.defaultBorderRadius ? 4 : 0)}
-                            fill={shape.defaultFillColor ?? 'var(--j-surface-2, #f1f5f9)'}
-                            stroke={shape.defaultBorderColor ?? 'var(--j-fg-muted, #475569)'}
-                            strokeWidth="1.5"
-                            strokeDasharray={shape.defaultBorderDash?.length ? '3 2' : undefined}
-                          />
-                          {decD && (
+                        <svg width="38" height="26" viewBox="-2 -2 38 26" aria-hidden="true">
+                          <g transform={`translate(${ox}, ${oy})`}>
                             <path
-                              d={decD}
-                              fill="none"
+                              d={shape.renderPath(w, h, r)}
+                              fill={shape.defaultFillColor ?? 'var(--j-surface-2, #f1f5f9)'}
                               stroke={shape.defaultBorderColor ?? 'var(--j-fg-muted, #475569)'}
-                              strokeWidth="1.2"
+                              strokeWidth="1.4"
+                              strokeDasharray={shape.defaultBorderDash?.length ? '3 2' : undefined}
                             />
-                          )}
+                            {decD && (
+                              <path
+                                d={decD}
+                                fill="none"
+                                stroke={shape.defaultBorderColor ?? 'var(--j-fg-muted, #475569)'}
+                                strokeWidth="1.1"
+                              />
+                            )}
+                          </g>
                         </svg>
                         <span className="diagrav-palette-label">{shape.label}</span>
                       </button>
