@@ -115,7 +115,7 @@ export class InteractionController {
   private draggingLabel: RenderState['draggingLabel'] = null;
   private drag: DragSession | null = null;
   private selectionListeners = new Set<SelectionListener>();
-  private activeInlineInput: HTMLInputElement | null = null;
+  private activeInlineInput: HTMLTextAreaElement | null = null;
 
   constructor(
     private engine: CommandEngine,
@@ -1260,17 +1260,20 @@ export class InteractionController {
     }
 
     const screen = this.renderer.worldToScreen(worldPos, doc);
-    const input = document.createElement('input');
-    input.type = 'text';
+    const input = document.createElement('textarea');
     input.value = initialText;
+    input.rows = Math.max(1, initialText.split('\n').length);
     input.style.position = 'fixed';
-    input.style.left = `${screen.x - 80}px`;
-    input.style.top = `${screen.y - 15}px`;
-    input.style.width = '160px';
-    input.style.height = '30px';
-    input.style.padding = '2px 8px';
+    input.style.width = '180px';
+    input.style.minHeight = '30px';
+    input.style.padding = '4px 8px';
+    input.style.fontFamily = 'system-ui, -apple-system, sans-serif';
     input.style.fontSize = '13px';
+    input.style.lineHeight = '1.3';
     input.style.textAlign = 'center';
+    input.style.resize = 'none';
+    input.style.overflow = 'hidden';
+    input.style.boxSizing = 'border-box';
     input.style.border = '2px solid var(--j-accent, #2563eb)';
     input.style.borderRadius = '6px';
     input.style.background = 'var(--j-surface-1, #ffffff)';
@@ -1278,6 +1281,14 @@ export class InteractionController {
     input.style.outline = 'none';
     input.style.zIndex = '9999';
     input.style.boxShadow = '0 4px 12px rgba(15, 23, 42, 0.18)';
+
+    const syncSizeAndPos = () => {
+      input.style.height = 'auto';
+      const h = Math.max(30, input.scrollHeight + 4);
+      input.style.height = `${h}px`;
+      input.style.left = `${screen.x - 90}px`;
+      input.style.top = `${screen.y - h / 2}px`;
+    };
 
     const commit = () => {
       const text = input.value;
@@ -1307,8 +1318,9 @@ export class InteractionController {
       }
     };
 
+    input.addEventListener('input', syncSizeAndPos);
     input.addEventListener('keydown', (ev) => {
-      if (ev.key === 'Enter') {
+      if (ev.key === 'Enter' && !ev.shiftKey) {
         ev.preventDefault();
         this.closeInlineEditor(true);
       } else if (ev.key === 'Escape') {
@@ -1318,8 +1330,9 @@ export class InteractionController {
     });
     input.addEventListener('blur', () => this.closeInlineEditor(true));
 
-    (input as HTMLInputElement & { __commit?: () => void }).__commit = commit;
+    (input as HTMLTextAreaElement & { __commit?: () => void }).__commit = commit;
     document.body.appendChild(input);
+    syncSizeAndPos();
     input.focus();
     input.select();
     this.activeInlineInput = input;
@@ -1330,7 +1343,7 @@ export class InteractionController {
     if (!input) return;
     this.activeInlineInput = null;
     if (commit) {
-      const fn = (input as HTMLInputElement & { __commit?: () => void }).__commit;
+      const fn = (input as HTMLTextAreaElement & { __commit?: () => void }).__commit;
       fn?.();
     }
     input.remove();

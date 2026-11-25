@@ -23,13 +23,13 @@ import {
   Collapsible,
   ColorPicker,
   Field,
-  Input,
   Kbd,
   NumberInput,
   Select,
   Separator,
   Stack,
   Switch,
+  Textarea,
   Tooltip,
 } from 'jenni-react';
 import { useEffect, useRef, useState } from 'react';
@@ -158,11 +158,15 @@ function DebouncedTextInput({
     }
   };
 
+  const rows = Math.min(4, Math.max(1, draft.split('\n').length));
+
   return (
-    <Input
+    <Textarea
       size="sm"
       disabled={disabled}
+      rows={rows}
       value={draft}
+      placeholder="Shift+Enter for new line"
       onValueChange={(next) => {
         setDraft(next);
         if (timerRef.current !== null) window.clearTimeout(timerRef.current);
@@ -170,10 +174,12 @@ function DebouncedTextInput({
       }}
       onBlur={() => flush(draft)}
       onKeyDown={(e) => {
-        if (e.key === 'Enter') {
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
           flush(draft);
         }
       }}
+      style={{ resize: 'none' }}
     />
   );
 }
