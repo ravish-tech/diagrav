@@ -427,7 +427,7 @@ export function PropertiesPanel({
       fill.type === 'solid'
         ? fill.color
         : fill.type === 'linear-gradient' || fill.type === 'radial-gradient'
-          ? fill.stops[0]?.color ?? '#f8fafc'
+          ? fill.stops[fill.stops.length - 1]?.color ?? '#e2e8f0'
           : '#f8fafc';
     const gradStart =
       fill.type === 'linear-gradient' || fill.type === 'radial-gradient'
@@ -470,8 +470,14 @@ export function PropertiesPanel({
 
     const handleQuickFillColor = (c: string) => {
       const nextFill: FillStyle =
-        fill.type === 'solid'
-          ? { ...fill, color: c }
+        fill.type === 'linear-gradient' || fill.type === 'radial-gradient'
+          ? {
+              ...fill,
+              stops: [
+                { color: fill.stops[0]?.color ?? '#ffffff', offset: 0 },
+                { color: c, offset: 1 },
+              ],
+            }
           : { type: 'solid', color: c, opacity: 1 };
       onUpdateNode(selectedNode.id, { style: { fill: nextFill } }, `node-fill:${selectedNode.id}`);
     };

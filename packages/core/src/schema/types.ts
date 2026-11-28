@@ -213,7 +213,14 @@ export function createDefaultNode(
       rotation: overrides.geometry?.rotation ?? 0,
     },
     style: {
-      fill: overrides.style?.fill ?? { type: 'solid', color: '#f8fafc', opacity: 1 },
+      fill: overrides.style?.fill ?? {
+        type: 'linear-gradient',
+        angle: 180,
+        stops: [
+          { color: '#ffffff', offset: 0 },
+          { color: '#e2e8f0', offset: 1 },
+        ],
+      },
       border: {
         color: overrides.style?.border?.color ?? '#475569',
         width: overrides.style?.border?.width ?? 1.5,

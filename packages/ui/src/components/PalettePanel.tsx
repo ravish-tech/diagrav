@@ -103,10 +103,22 @@ export function PalettePanel({ shapes, disabled, onAddShape }: PalettePanelProps
                         }
                       >
                         <svg width="38" height="26" viewBox="-2 -2 38 26" aria-hidden="true">
+                          {!shape.isContainer && (
+                            <defs>
+                              <linearGradient id={`pal-g-${shape.type}`} x1="0%" y1="0%" x2="0%" y2="100%">
+                                <stop offset="0%" stopColor={shape.defaultFillColor ?? '#ffffff'} />
+                                <stop offset="100%" stopColor={shape.defaultFillEndColor ?? '#e2e8f0'} />
+                              </linearGradient>
+                            </defs>
+                          )}
                           <g transform={`translate(${ox}, ${oy})`}>
                             <path
                               d={shape.renderPath(w, h, r)}
-                              fill={shape.defaultFillColor ?? 'var(--j-surface-2, #f1f5f9)'}
+                              fill={
+                                shape.isContainer
+                                  ? shape.defaultFillColor ?? 'var(--j-surface-2, #f1f5f9)'
+                                  : `url(#pal-g-${shape.type})`
+                              }
                               stroke={shape.defaultBorderColor ?? 'var(--j-fg-muted, #475569)'}
                               strokeWidth="1.4"
                               strokeDasharray={shape.defaultBorderDash?.length ? '3 2' : undefined}

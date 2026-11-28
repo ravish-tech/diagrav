@@ -13,6 +13,7 @@ import {
   createMatchSizeCommand,
   exportDocumentToGraphMl,
   exportDocumentToSvg,
+  getDefaultFillForShape,
   validateDocument,
   type ArrowType,
   type AutoLayoutAlgorithm,
@@ -153,11 +154,7 @@ export class DiagravMcpSession {
           params.fill ??
           (params.fillColor
             ? { type: 'solid', color: params.fillColor, opacity: 1 }
-            : {
-                type: 'solid',
-                color: shapeDef.defaultFillColor ?? '#f8fafc',
-                opacity: shapeDef.isContainer ? 0.65 : 1,
-              }),
+            : getDefaultFillForShape(shapeDef)),
         border: {
           color: params.borderColor ?? shapeDef.defaultBorderColor ?? '#475569',
           width: params.borderWidth ?? 1.5,

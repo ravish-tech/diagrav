@@ -1,4 +1,4 @@
-import type { DiagramNode, NodeLabelPlacement, Point } from '../schema/types.js';
+import type { DiagramNode, FillStyle, NodeLabelPlacement, Point } from '../schema/types.js';
 
 export interface ShapeDefinition {
   type: string;
@@ -10,6 +10,8 @@ export interface ShapeDefinition {
   defaultBorderRadius?: number;
   defaultBorderDash?: number[];
   defaultFillColor?: string;
+  /** Optional bottom/end stop color for subtle default linear gradients (180deg top-to-bottom). */
+  defaultFillEndColor?: string;
   defaultBorderColor?: string;
   defaultLabelPlacement?: NodeLabelPlacement;
   /** Containers render behind normal nodes and edges so shapes can be placed inside them. */
@@ -20,6 +22,29 @@ export interface ShapeDefinition {
   renderDecorations?(width: number, height: number, borderRadius?: number): string;
   /** Computes boundary anchor point on the node perimeter facing `towards`. */
   getAnchorPoint(node: DiagramNode, towards: Point): Point;
+}
+
+/**
+ * Returns the default FillStyle for a shape:
+ * - Containers use a subtle translucent solid fill so child shapes stand out cleanly.
+ * - All other shapes use a crisp yEd-style subtle top-to-bottom linear gradient.
+ */
+export function getDefaultFillForShape(shape: ShapeDefinition): FillStyle {
+  if (shape.isContainer) {
+    return {
+      type: 'solid',
+      color: shape.defaultFillColor ?? '#f8fafc',
+      opacity: 0.65,
+    };
+  }
+  return {
+    type: 'linear-gradient',
+    angle: 180,
+    stops: [
+      { color: shape.defaultFillColor ?? '#ffffff', offset: 0 },
+      { color: shape.defaultFillEndColor ?? '#e2e8f0', offset: 1 },
+    ],
+  };
 }
 
 function getNodeCenter(node: DiagramNode): Point {
@@ -301,7 +326,8 @@ export const BUILTIN_SHAPES: ShapeDefinition[] = [
     label: 'Start / End',
     category: 'Flowchart',
     defaultSize: { width: 136, height: 48 },
-    defaultFillColor: '#ecfdf5',
+    defaultFillColor: '#ffffff',
+    defaultFillEndColor: '#dcfce7',
     defaultBorderColor: '#16a34a',
     renderPath: (w, h) => roundedRectPath(w, h, h / 2),
     getAnchorPoint: rectAnchor,
@@ -312,7 +338,8 @@ export const BUILTIN_SHAPES: ShapeDefinition[] = [
     category: 'Flowchart',
     defaultSize: { width: 144, height: 60 },
     defaultBorderRadius: 4,
-    defaultFillColor: '#eff6ff',
+    defaultFillColor: '#ffffff',
+    defaultFillEndColor: '#dbeafe',
     defaultBorderColor: '#2563eb',
     renderPath: (w, h, r) => roundedRectPath(w, h, r ?? 4),
     getAnchorPoint: rectAnchor,
@@ -322,7 +349,8 @@ export const BUILTIN_SHAPES: ShapeDefinition[] = [
     label: 'Decision',
     category: 'Flowchart',
     defaultSize: { width: 128, height: 84 },
-    defaultFillColor: '#fffbeb',
+    defaultFillColor: '#ffffff',
+    defaultFillEndColor: '#fef3c7',
     defaultBorderColor: '#d97706',
     renderPath: (w, h) => polygonPath(diamondPoints(w, h)),
     getAnchorPoint: (node, towards) =>
@@ -333,7 +361,8 @@ export const BUILTIN_SHAPES: ShapeDefinition[] = [
     label: 'Data I/O',
     category: 'Flowchart',
     defaultSize: { width: 144, height: 60 },
-    defaultFillColor: '#f5f3ff',
+    defaultFillColor: '#ffffff',
+    defaultFillEndColor: '#ede9fe',
     defaultBorderColor: '#7c3aed',
     renderPath: (w, h) => polygonPath(parallelogramPoints(w, h)),
     getAnchorPoint: (node, towards) =>
@@ -499,7 +528,8 @@ export const BUILTIN_SHAPES: ShapeDefinition[] = [
     category: 'Architecture',
     keywords: ['db', 'sql', 'postgres', 'mysql', 'storage', 'cylinder', 'store', 'cache', 'redis'],
     defaultSize: { width: 120, height: 84 },
-    defaultFillColor: '#fff7ed',
+    defaultFillColor: '#ffffff',
+    defaultFillEndColor: '#ffedd5',
     defaultBorderColor: '#ea580c',
     renderPath: (w, h) => {
       const ry = Math.min(13, h * 0.18);
@@ -519,7 +549,8 @@ export const BUILTIN_SHAPES: ShapeDefinition[] = [
     category: 'Architecture',
     keywords: ['cloud', 'aws', 'gcp', 'azure', 'internet', 'network', 'saas'],
     defaultSize: { width: 156, height: 84 },
-    defaultFillColor: '#f0f9ff',
+    defaultFillColor: '#ffffff',
+    defaultFillEndColor: '#e0f2fe',
     defaultBorderColor: '#0284c7',
     renderPath: (w, h) => {
       const s = (x: number, y: number) => `${(x * w).toFixed(1)} ${(y * h).toFixed(1)}`;
@@ -540,7 +571,8 @@ export const BUILTIN_SHAPES: ShapeDefinition[] = [
     category: 'Architecture',
     keywords: ['queue', 'kafka', 'pubsub', 'broker', 'mq', 'topic', 'stream', 'bus'],
     defaultSize: { width: 148, height: 56 },
-    defaultFillColor: '#faf5ff',
+    defaultFillColor: '#ffffff',
+    defaultFillEndColor: '#f3e8ff',
     defaultBorderColor: '#9333ea',
     renderPath: (w, h) => {
       const rx = Math.min(12, w * 0.14);
@@ -561,7 +593,8 @@ export const BUILTIN_SHAPES: ShapeDefinition[] = [
     keywords: ['server', 'service', 'api', 'microservice', 'backend', 'worker', 'pod', 'k8s'],
     defaultSize: { width: 148, height: 72 },
     defaultBorderRadius: 6,
-    defaultFillColor: '#f0fdf4',
+    defaultFillColor: '#ffffff',
+    defaultFillEndColor: '#dcfce7',
     defaultBorderColor: '#15803d',
     renderPath: (w, h, r) => roundedRectPath(w, h, r ?? 6),
     renderDecorations: (w, h) => {
@@ -599,6 +632,7 @@ export const BUILTIN_SHAPES: ShapeDefinition[] = [
     keywords: ['note', 'sticky', 'comment', 'annotation', 'memo'],
     defaultSize: { width: 148, height: 84 },
     defaultFillColor: '#fefce8',
+    defaultFillEndColor: '#fef08a',
     defaultBorderColor: '#ca8a04',
     renderPath: (w, h) => {
       const fold = Math.min(16, w * 0.18, h * 0.28);
@@ -688,7 +722,8 @@ export const BUILTIN_SHAPES: ShapeDefinition[] = [
     label: 'Use Case',
     category: 'UML',
     defaultSize: { width: 148, height: 68 },
-    defaultFillColor: '#eff6ff',
+    defaultFillColor: '#ffffff',
+    defaultFillEndColor: '#dbeafe',
     defaultBorderColor: '#2563eb',
     renderPath: (w, h) => {
       const rx = w / 2;

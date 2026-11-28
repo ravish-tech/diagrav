@@ -3,6 +3,7 @@ import {
   createDefaultNode,
   createDefaultNodeLabel,
   exportDocumentToGraphMl,
+  getDefaultFillForShape,
   importGraphMlToDocument,
   validateDocument,
   type AutoLayoutAlgorithm,
@@ -295,11 +296,7 @@ export function App() {
         height: shape.defaultSize.height,
       },
       style: {
-        fill: {
-          type: 'solid',
-          color: shape.defaultFillColor ?? '#f8fafc',
-          opacity: shape.isContainer ? 0.65 : 1,
-        },
+        fill: getDefaultFillForShape(shape),
         border: {
           color: shape.defaultBorderColor ?? '#475569',
           width: 1.5,
@@ -307,6 +304,7 @@ export function App() {
           radius: shape.defaultBorderRadius ?? 0,
           opacity: 1,
         },
+        shadow: !shape.isContainer,
       },
     });
     engine.execute({ type: 'node.create', node });
